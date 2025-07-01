@@ -1,5 +1,5 @@
 import { AudioPlayer } from '@discordjs/voice';
-import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel } from 'discord.js';
 import { SpeechHandler } from '../api/discord/speech.js';
 import { ElevenLabsConversationalAI } from '../api/elevenlabs/conversationalClient.js';
 import { VoiceConnectionHandler } from '../api/index.js';
@@ -18,8 +18,16 @@ export const data = new SlashCommandBuilder()
  */
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
+    if (!interaction.channel || !(interaction.channel instanceof TextChannel)) {
+      await interaction.reply({
+        embeds: [Embeds.error('Error', 'This command can only be used in text channels!')],
+        ephemeral: true,
+      });
+      return;
+    }
+
     const audioPlayer = new AudioPlayer();
-    const elevenlabsConvClient = new ElevenLabsConversationalAI(audioPlayer);
+    const elevenlabsConvClient = new ElevenLabsConversationalAI(audioPlayer, interaction.channel);
     const connectionHandler = new VoiceConnectionHandler(interaction);
 
     const connection = await connectionHandler.connect();

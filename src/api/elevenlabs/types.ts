@@ -35,10 +35,11 @@ export interface PingEvent {
   };
 }
 
-export interface ConversationInitiationMetadata {
-  type: 'conversation_initiation_metadata';
-  conversation_initiation_metadata_event: {
-    conversation_id: string;
-    agent_output_audio_format: string;
+export interface ClientToolCallEvent {
+  type: 'client_tool_call';
+  client_tool_call?: {
+    tool_name?: string;
+    tool_call_id?: string;
+    parameters?: Record<string, any>;
   };
 }
