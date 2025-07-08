@@ -13,10 +13,6 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 ### Prerequisites
 
 - Latest LTS version of Node.js
-- FFmpeg installed on your system
-  - Windows: Install via [FFmpeg website](https://ffmpeg.org/download.html)
-  - macOS: `brew install ffmpeg`
-  - Linux: `sudo apt install ffmpeg`
 
 ### Setup
 
@@ -53,7 +49,7 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 
    Then copy the generated URL at the bottom, paste it into your browser, and follow the prompts to invite the bot to your server.
 
-7. Go to https://elevenlabs.io/app/conversational-ai to set up your voice agent. Make sure to set the output format of the audio to 44.1kHz, copy the `AGENT_ID` and fill it in the .env file.
+7. Go to https://elevenlabs.io/app/conversational-ai to set up your voice agent. Make sure to set the output format of the audio to 48kHz, copy the `AGENT_ID` and fill it in the .env file.
 
 8. Install dependencies and run the bot.
 
