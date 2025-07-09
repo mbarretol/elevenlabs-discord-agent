@@ -13,6 +13,10 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 ### Prerequisites
 
 - Latest LTS version of Node.js
+- FFmpeg installed on your system
+   - Windows: Install via [FFmpeg website](https://ffmpeg.org/download.html)
+   - macOS: `brew install ffmpeg`
+   - Linux: `sudo apt install ffmpeg`
 
 ### Setup
 
