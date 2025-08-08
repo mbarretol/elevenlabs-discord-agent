@@ -2,7 +2,8 @@ import { REST, Routes } from 'discord.js';
 import { readdirSync } from 'fs';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { DISCORD_CONFIG, logger } from '../config/index.js';
+import { DISCORD_CONFIG } from '../config/config.js';
+import { logger } from '../config/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

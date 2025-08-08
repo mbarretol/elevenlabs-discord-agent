@@ -8,7 +8,8 @@ import {
 import { readdirSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { DISCORD_CONFIG, logger } from './config/index.js';
+import { DISCORD_CONFIG } from './config/config.js';
+import { logger } from './config/logger.js';
 import { deployCommands } from './utils/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

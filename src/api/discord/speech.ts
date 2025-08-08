@@ -1,7 +1,7 @@
 import opus from '@discordjs/opus';
 import { AudioReceiveStream, EndBehaviorType, VoiceConnection } from '@discordjs/voice';
-import { logger } from '../../config/index.js';
-import { ElevenLabsConversationalAI } from '../index.js';
+import { logger } from '../../config/logger.js';
+import { ElevenLabsConversationalAI } from '../elevenlabs/conversationalClient.js';
 
 /**
  * Handles speech processing for users in a voice channel.
@@ -33,10 +33,10 @@ class SpeechHandler {
       await this.client.connect();
 
       this.connection.receiver.speaking.on('start', (userId: string) => {
-        this.handleUserSpeaking(userId, this.connection);
+        this.handleUserSpeaking(userId);
       });
 
-      this.connection.on('stateChange', (oldState, newState) => {
+      this.connection.on('stateChange', (_oldState, newState) => {
         if (newState.status === 'disconnected' || newState.status === 'destroyed') {
           logger.info('Voice connection disconnected or destroyed. Cleaning up.');
           this.cleanup();
@@ -53,10 +53,10 @@ class SpeechHandler {
    * @param {VoiceConnection} connection - The voice connection.
    * @returns {void}
    */
-  private handleUserSpeaking(userId: string, connection: VoiceConnection): void {
+  private handleUserSpeaking(userId: string): void {
     if (this.speakingUsers.has(userId)) return;
 
-    this.createUserAudioStream(userId, connection);
+    this.createUserAudioStream(userId);
   }
 
   /**
@@ -65,9 +65,9 @@ class SpeechHandler {
    * @param {VoiceConnection} connection - The voice connection.
    * @returns {Promise<void>} A promise that resolves when the audio stream is created.
    */
-  private async createUserAudioStream(userId: string, connection: VoiceConnection): Promise<void> {
+  private async createUserAudioStream(userId: string): Promise<void> {
     try {
-      const opusAudioStream: AudioReceiveStream = connection.receiver.subscribe(userId, {
+      const opusAudioStream: AudioReceiveStream = this.connection.receiver.subscribe(userId, {
         end: { behavior: EndBehaviorType.Manual },
       });
 
@@ -88,8 +88,8 @@ class SpeechHandler {
    */
   private processAudio(opusBuffer: Buffer): void {
     try {
-      const pcmBuffer = this.decoder.decode(opusBuffer);
-      this.client.appendInputAudio(pcmBuffer);
+      const pcm = this.decoder.decode(opusBuffer);
+      this.client.appendInputAudio(pcm);
     } catch (error) {
       logger.error(error, 'Error processing audio for transcription');
     }
