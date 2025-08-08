@@ -30,23 +30,21 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 2. Rename `.env.example` to `.env` and start filling in the values as detailed below:
 
    ```
-   DISCORD_TOKEN = x
+   DISCORD_BOT_TOKEN = x
    DISCORD_CLIENT_ID = x
-
    AGENT_ID = x
+   TAVILY_API_KEY = x   # optional, only needed for web_search tool
    ```
 
 3. Create your own Discord application at https://discord.com/developers/applications.
 
 4. Go to the settings tab and click Bot.
-
    - Click "Reset Token" and fill in `DISCORD_BOT_TOKEN` in the .env file.
    - Disable "Public Bot" unless you want your bot to be visible by everyone.
 
 5. Go to the OAuth2 tab, copy your "Client ID", and fill in `DISCORD_CLIENT_ID` in the .env file.
 
 6. In the OAuth2 URL Generator Section, click on "bot" and set the following voice permissions:
-
    - Connect
    - Speak
    - Use Voice Activity

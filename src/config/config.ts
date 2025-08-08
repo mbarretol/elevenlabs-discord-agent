@@ -13,6 +13,12 @@ export const DISCORD_CONFIG = {
   CLIENT_ID: loadEnv('DISCORD_CLIENT_ID'),
 };
 
+export const TAVILY_CONFIG = {
+  TAVILY_KEY: loadEnv('TAVILY_API_KEY'),
+  MAX_RESULTS: 1,
+  INCLUDE_ANSWER: true,
+};
+
 export const ELEVENLABS_CONFIG = {
   AGENT_ID: loadEnv('AGENT_ID'),
   WS_BASE_URL: 'wss://api.elevenlabs.io/v1/convai/conversation',
