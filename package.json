@@ -1,6 +1,6 @@
 {
   "name": "elevenlabs-discord-voicebot",
-  "description": "Simple demo of ElevenLabs Conversational AI WebSocket that enables Discord uses to talk to LLM's via voice.",
+  "description": "Simple demo of ElevenLabs Conversational AI WebSocket that enables Discord users to talk to LLMs via voice.",
   "main": "dist/bot.js",
   "type": "module",
   "scripts": {
@@ -15,20 +15,20 @@
     "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.18.0",
     "@fal-ai/client": "^1.2.3",
-    "@types/node": "^22.9.3",
     "bufferutil": "^4.0.8",
     "discord.js": "^14.16.3",
-    "dotenv": "^16.4.7",
-    "elevenlabs": "^1.52.0",
+    "dotenv": "^17.2.0",
     "pino": "^9.0.0",
     "pino-pretty": "^13.0.0",
-    "sodium-native": "^4.1.1"
+    "sodium-native": "^5.0.6",
+    "tavily": "^1.0.2",
+    "utf-8-validate": "^6.0.5"
   },
   "devDependencies": {
+    "@types/node": "^24.0.14",
     "@eslint/js": "^9.11.1",
-    "@types/fluent-ffmpeg": "^2.1.27",
     "eslint": "^9.11.1",
-    "globals": "^15.9.0",
+    "globals": "^16.3.0",
     "prettier": "^3.3.3",
     "typescript": "^5.6.2",
     "typescript-eslint": "^8.8.0"
