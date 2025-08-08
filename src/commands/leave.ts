@@ -1,7 +1,6 @@
-import { SlashCommandBuilder } from '@discordjs/builders';
-import { CommandInteraction } from 'discord.js';
-import { VoiceConnectionHandler } from '../api/discord/voiceConnection.js';
-import { logger } from '../config/index.js';
+import { CommandInteraction, SlashCommandBuilder } from 'discord.js';
+import { getVoiceConnection } from '@discordjs/voice';
+import { logger } from '../config/logger.js';
 import { Embeds } from '../utils/index.js';
 
 /**
@@ -20,8 +19,9 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     await interaction.deferReply();
-    const connectionHandler = new VoiceConnectionHandler(interaction);
-    const success = await connectionHandler.disconnect();
+    const connection = getVoiceConnection(interaction.guildId!);
+    const success = !!connection;
+    if (connection) connection.destroy();
 
     if (success) {
       await interaction.editReply({

@@ -1,8 +1,12 @@
-import { AudioPlayer } from '@discordjs/voice';
-import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel } from 'discord.js';
+import { AudioPlayer, joinVoiceChannel, getVoiceConnection } from '@discordjs/voice';
+import {
+  ChatInputCommandInteraction,
+  SlashCommandBuilder,
+  TextChannel,
+  GuildMember,
+} from 'discord.js';
 import { SpeechHandler } from '../api/discord/speech.js';
 import { ElevenLabsConversationalAI } from '../api/elevenlabs/conversationalClient.js';
-import { VoiceConnectionHandler } from '../api/index.js';
 import { logger } from '../config/logger.js';
 import { Embeds } from '../utils/index.js';
 
@@ -28,12 +32,34 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     const audioPlayer = new AudioPlayer();
     const elevenlabsConvClient = new ElevenLabsConversationalAI(audioPlayer, interaction.channel);
-    const connectionHandler = new VoiceConnectionHandler(interaction);
 
-    const connection = await connectionHandler.connect();
-    if (!connection) {
+    if (!(interaction.member instanceof GuildMember) || !interaction.member.voice.channel) {
+      await interaction.reply({
+        embeds: [Embeds.error('Error', 'You need to be in a voice channel to use this command.')],
+        ephemeral: true,
+      });
       return;
     }
+
+    if (getVoiceConnection(interaction.guildId!)) {
+      await interaction.reply({
+        embeds: [Embeds.error('Error', 'Bot is already in a voice channel.')],
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const connection = joinVoiceChannel({
+      channelId: interaction.member.voice.channel.id,
+      guildId: interaction.guildId!,
+      adapterCreator: interaction.guild!.voiceAdapterCreator,
+      selfDeaf: false,
+      selfMute: false,
+    });
+
+    await interaction.reply({
+      embeds: [Embeds.success('Connected', "Let's chat!")],
+    });
 
     connection.subscribe(audioPlayer);
 
