@@ -20,20 +20,7 @@ export interface AgentResponseEvent {
   };
 }
 
-export interface InterruptionEvent {
-  type: 'interruption';
-  interruption_event: {
-    event_id: number;
-  };
-}
-
-export interface PingEvent {
-  type: 'ping';
-  ping_event: {
-    event_id: number;
-    ping_ms: number;
-  };
-}
+// Removed unused InterruptionEvent
 
 export interface ClientToolCallEvent {
   type: 'client_tool_call';
