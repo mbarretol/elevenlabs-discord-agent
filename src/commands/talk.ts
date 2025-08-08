@@ -8,7 +8,7 @@ import {
 import { SpeechHandler } from '../api/discord/speech.js';
 import { ElevenLabsConversationalAI } from '../api/elevenlabs/conversationalClient.js';
 import { logger } from '../config/logger.js';
-import { Embeds } from '../utils/index.js';
+import { Embeds } from '../utils/embedHelper.js';
 
 export const data = new SlashCommandBuilder()
   .setName('talk')

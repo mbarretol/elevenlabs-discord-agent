@@ -1,7 +1,7 @@
 import { CommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
 import { logger } from '../config/logger.js';
-import { Embeds } from '../utils/index.js';
+import { Embeds } from '../utils/embedHelper.js';
 
 /**
  * Represents the structure of the leave command using native SlashCommandBuilder.

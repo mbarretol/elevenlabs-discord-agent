@@ -9,7 +9,7 @@ import type {
   UserTranscriptEvent,
 } from './types.js';
 import { TextChannel } from 'discord.js';
-import { base64MonoPcmToStereo } from '../../utils/index.js';
+import { base64MonoPcmToStereo } from '../../utils/audioUtils.js';
 import { PassThrough } from 'stream';
 import { TavilyClient } from 'tavily';
 import { handleToolCall } from './tools/toolHandlers.js';

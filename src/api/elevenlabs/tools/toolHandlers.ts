@@ -2,7 +2,7 @@ import { getVoiceConnection } from '@discordjs/voice';
 import { TextChannel } from 'discord.js';
 import { fal } from '@fal-ai/client';
 import { TavilyClient } from 'tavily';
-import { Embeds } from '../../../utils/index.js';
+import { Embeds } from '../../../utils/embedHelper.js';
 import { logger } from '../../../config/logger.js';
 import { TAVILY_CONFIG } from '../../../config/config.js';
 
