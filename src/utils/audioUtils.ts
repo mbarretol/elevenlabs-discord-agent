@@ -6,14 +6,12 @@ export function base64MonoPcmToStereo(base64: string): Buffer {
   const mono = Buffer.from(base64, 'base64');
   if (mono.byteLength === 0) return Buffer.alloc(0);
 
-  const samples = mono.byteLength / 2;
-  const stereo = Buffer.allocUnsafe(samples * 4);
-
-  for (let i = 0; i < samples; i++) {
-    const s = mono.readInt16LE(i * 2);
-    stereo.writeInt16LE(s, i * 4);
-    stereo.writeInt16LE(s, i * 4 + 2);
+  const inView = new Int16Array(mono.buffer, mono.byteOffset, mono.byteLength / 2);
+  const outView = new Int16Array(inView.length * 2);
+  for (let i = 0, j = 0; i < inView.length; i++, j += 2) {
+    const s = inView[i];
+    outView[j] = s;
+    outView[j + 1] = s;
   }
-
-  return stereo;
+  return Buffer.from(outView.buffer, outView.byteOffset, outView.byteLength);
 }

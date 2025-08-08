@@ -1,12 +1,11 @@
 import { ColorResolvable, EmbedBuilder } from 'discord.js';
 
-type PresetType = 'success' | 'error' | 'info' | 'warning';
+type PresetType = 'success' | 'error' | 'info';
 
 const presetColors: Record<PresetType, ColorResolvable> = {
   success: 'Green',
   error: 'Red',
   info: 'Blue',
-  warning: 'Yellow',
 };
 
 /**
@@ -39,5 +38,4 @@ export const Embeds = {
   success: (title: string, description?: string) => createEmbed(title, description, 'success'),
   error: (title: string, description?: string) => createEmbed(title, description, 'error'),
   info: (title: string, description?: string) => createEmbed(title, description, 'info'),
-  warning: (title: string, description?: string) => createEmbed(title, description, 'warning'),
 };
