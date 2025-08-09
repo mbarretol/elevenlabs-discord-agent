@@ -20,8 +20,6 @@ export interface AgentResponseEvent {
   };
 }
 
-// Removed unused InterruptionEvent
-
 export interface ClientToolCallEvent {
   type: 'client_tool_call';
   client_tool_call?: {

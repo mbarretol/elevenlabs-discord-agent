@@ -1,4 +1,4 @@
-import { AudioPlayer, AudioPlayerStatus, createAudioResource, StreamType } from '@discordjs/voice';
+import { AudioPlayer, createAudioResource, StreamType } from '@discordjs/voice';
 import WebSocket from 'ws';
 import { logger } from '../../config/logger.js';
 import { TAVILY_CONFIG, ELEVENLABS_CONFIG } from '../../config/config.js';
@@ -7,7 +7,7 @@ import type {
   AudioEvent,
   ClientToolCallEvent,
   UserTranscriptEvent,
-} from './types.js';
+} from './types/websocket.js';
 import { TextChannel } from 'discord.js';
 import { base64MonoPcmToStereo } from '../../utils/audioUtils.js';
 import { PassThrough } from 'stream';
@@ -24,7 +24,6 @@ export class ElevenLabsConversationalAI {
   private socket: WebSocket | null = null;
   private pcmStream: PassThrough | null = null;
   private tavily: TavilyClient;
-  // Minimal connection management – no heartbeat/reconnect logic
   constructor(
     private audioPlayer: AudioPlayer,
     private textChannel: TextChannel
@@ -114,15 +113,6 @@ export class ElevenLabsConversationalAI {
         this.pcmStream = null;
       }
     });
-    this.audioPlayer.on(AudioPlayerStatus.Idle, () => {
-      if (this.pcmStream) {
-        try {
-          this.pcmStream.end();
-          this.pcmStream.destroy();
-        } catch {}
-        this.pcmStream = null;
-      }
-    });
   }
 
   /**
@@ -144,8 +134,6 @@ export class ElevenLabsConversationalAI {
   private handleInterruption(): void {
     logger.info('Conversation interrupted. Stopping audio playback.');
     this.audioPlayer.stop();
-    this.pcmStream?.end();
-    this.pcmStream = null;
   }
 
   /**
@@ -286,8 +274,6 @@ export class ElevenLabsConversationalAI {
     this.socket.send(JSON.stringify(response));
     logger.info(`Sent tool response for ${toolCallId} (isError: ${isError}).`);
   }
-
-  // Tool handlers moved to tools/toolHandlers.ts
 
   /**
    * Handles agent response events, logging the agent's response text.
