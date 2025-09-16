@@ -1,66 +1,69 @@
 import { AudioPlayer, createAudioResource, StreamType } from '@discordjs/voice';
 import WebSocket from 'ws';
 import { logger } from '../../config/logger.js';
-import { TAVILY_CONFIG, ELEVENLABS_CONFIG } from '../../config/config.js';
+import { ELEVENLABS_CONFIG } from '../../config/config.js';
 import type {
   AgentResponseEvent,
   AudioEvent,
   ClientToolCallEvent,
   UserTranscriptEvent,
 } from './types/websocket.js';
-import { TextChannel } from 'discord.js';
 import { base64MonoPcmToStereo } from '../../utils/audioUtils.js';
 import { PassThrough } from 'stream';
-import { TavilyClient } from 'tavily';
-import { handleToolCall } from './tools/toolHandlers.js';
+import { ToolRegistry } from './tools/toolRegistry.js';
 
 /**
- * Manages WebSocket connection and interaction with ElevenLabs Conversational AI.
- * Handles audio streaming, event processing, and various AI interactions.
- * Optimized for low latency using a native Node.js stream for audio conversion.
+ * Orchestrates the ElevenLabs Agent, maintains the WebSocket session,
+ * streams audio in and out of Discord, and dispatches tool calls.
  */
-export class ElevenLabsConversationalAI {
+export class Agent {
   private url: string;
   private socket: WebSocket | null = null;
   private pcmStream: PassThrough | null = null;
-  private tavily: TavilyClient;
   constructor(
     private audioPlayer: AudioPlayer,
-    private textChannel: TextChannel
+    private toolRegistry: ToolRegistry
   ) {
     this.url = `${ELEVENLABS_CONFIG.WS_BASE_URL}?agent_id=${ELEVENLABS_CONFIG.AGENT_ID}`;
-    this.tavily = new TavilyClient({
-      apiKey: TAVILY_CONFIG.TAVILY_KEY,
-    });
   }
 
   /**
-   * Establishes a WebSocket connection to the ElevenLabs Conversational AI.
+   * Establishes a WebSocket connection to the ElevenLabs Agent.
    * @returns A promise that resolves when the connection is open, or rejects on error.
    */
   public async connect(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      logger.info('Establishing connection to ElevenLabs Conversational WebSocket...');
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      logger.debug('Tried to connect while socket already open; reusing existing connection.');
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      logger.info('Connecting to ElevenLabs Agent WebSocket...');
       this.socket = new WebSocket(this.url, { perMessageDeflate: false });
 
-      this.socket.on('open', () => {
-        logger.info('Successfully connected to ElevenLabs Conversational WebSocket.');
+      const handleOpen = () => {
+        logger.info('Connected to ElevenLabs Agent WebSocket.');
+        this.socket?.removeListener('error', handleError);
         this.bindAudioPlayerEvents();
         resolve();
-      });
+      };
 
-      this.socket.on('error', error => {
-        logger.error(error, 'WebSocket encountered an error');
+      const handleError = (error: Error) => {
+        logger.error(error, 'ElevenLabs Agent WebSocket encountered an error');
+        this.socket?.removeListener('open', handleOpen);
         this.audioPlayer.stop();
-        reject(new Error(`Error during WebSocket connection: ${error.message}`));
-      });
+        reject(new Error(`Error during ElevenLabs Agent WebSocket connection: ${error.message}`));
+      };
 
-      this.socket.on('close', (code: number, reason: Buffer) => {
-        logger.info(`ElevenLabs WebSocket closed with code ${code}. Reason: ${reason.toString()}`);
+      this.socket?.once('open', handleOpen);
+      this.socket?.once('error', handleError);
+
+      this.socket?.on('close', (code: number, reason: Buffer) => {
+        logger.info(`ElevenLabs Agent WebSocket closed with code ${code}. Reason: ${reason.toString()}`);
         this.cleanup();
       });
 
-      this.socket.on('message', message => this.handleEvent(message));
+      this.socket?.on('message', message => this.handleEvent(message));
     });
   }
 
@@ -69,27 +72,8 @@ export class ElevenLabsConversationalAI {
    */
   private cleanup(): void {
     logger.info('Cleaning up ElevenLabs resources...');
-    try {
-      if (this.socket) {
-        try {
-          if (
-            this.socket.readyState === WebSocket.OPEN ||
-            this.socket.readyState === WebSocket.CONNECTING
-          ) {
-            this.socket.close();
-          }
-        } catch {}
-        this.socket.removeAllListeners();
-        this.socket = null;
-      }
-      if (this.pcmStream) {
-        try {
-          this.pcmStream.end();
-          this.pcmStream.destroy();
-        } catch {}
-        this.pcmStream = null;
-      }
-    } catch {}
+    this.closeSocket();
+    this.disposePcmStream();
     logger.info('Cleanup finished.');
   }
 
@@ -101,23 +85,20 @@ export class ElevenLabsConversationalAI {
     this.cleanup();
   }
 
+  /**
+   * Registers error handling on the Discord audio player to keep the PCM stream healthy.
+   */
   private bindAudioPlayerEvents(): void {
     this.audioPlayer.removeAllListeners();
     this.audioPlayer.on('error', error => {
       logger.error(error, 'AudioPlayer error encountered, ending current PCM stream');
-      if (this.pcmStream) {
-        try {
-          this.pcmStream.end();
-          this.pcmStream.destroy();
-        } catch {}
-        this.pcmStream = null;
-      }
+      this.disposePcmStream();
     });
   }
 
   /**
-   * Appends a new audio chunk to the input stream for the ElevenLabs AI.
-   * @param buffer - PCM 16 kHz mono audio buffer to append; converted to base64 for transport.
+   * Appends a new audio chunk to the input stream for the ElevenLabs Agent.
+   * @param buffer - PCM 16 kHz mono audio buffer to append, converted to base64 for transport.
    */
   public appendInputAudio(buffer: Buffer): void {
     if (buffer.byteLength === 0 || this.socket?.readyState !== WebSocket.OPEN) return;
@@ -137,7 +118,7 @@ export class ElevenLabsConversationalAI {
   }
 
   /**
-   * Processes incoming AI audio events. It ensures the audio pipeline is running
+   * Processes incoming audio events. It ensures the audio pipeline is running
    * and then writes the audio chunk to it for playback.
    * @param message - The AudioEvent from the WebSocket.
    */
@@ -149,26 +130,67 @@ export class ElevenLabsConversationalAI {
       const stereoBuf = base64MonoPcmToStereo(b64);
       if (!stereoBuf.byteLength) return;
 
-      if (!this.pcmStream || this.pcmStream.destroyed) {
-        if (this.pcmStream) {
-          try {
-            this.pcmStream.end();
-            this.pcmStream.destroy();
-          } catch {}
-        }
-        this.pcmStream = new PassThrough({ highWaterMark: 4096 });
-        this.pcmStream.write(stereoBuf);
+      const { stream, isNew } = this.getOrCreatePcmStream();
+      stream.write(stereoBuf);
 
-        const resource = createAudioResource(this.pcmStream, {
+      if (isNew) {
+        const resource = createAudioResource(stream, {
           inputType: StreamType.Raw,
         });
 
         this.audioPlayer.play(resource);
-      } else {
-        this.pcmStream.write(stereoBuf);
       }
     } catch (error) {
       logger.error(error, 'Error while streaming ElevenLabs audio chunk');
+    }
+  }
+
+  /**
+   * Provides a writable PCM stream for audio playback, replacing a destroyed stream if needed.
+   * @returns The active stream and a flag indicating whether it was newly created.
+   */
+  private getOrCreatePcmStream(): { stream: PassThrough; isNew: boolean } {
+    if (this.pcmStream && !this.pcmStream.destroyed) {
+      return { stream: this.pcmStream, isNew: false };
+    }
+
+    this.pcmStream = new PassThrough({ highWaterMark: 4096 });
+    return { stream: this.pcmStream, isNew: true };
+  }
+
+  /**
+   * Closes the WebSocket connection and removes all listeners.
+   */
+  private closeSocket(): void {
+    if (!this.socket) return;
+
+    try {
+      if (
+        this.socket.readyState === WebSocket.OPEN ||
+        this.socket.readyState === WebSocket.CONNECTING
+      ) {
+        this.socket.close();
+      }
+    } catch (error) {
+      logger.debug(error, 'Error closing WebSocket');
+    } finally {
+      this.socket.removeAllListeners();
+      this.socket = null;
+    }
+  }
+
+  /**
+   * Tears down the PCM stream to release resources and stop playback.
+   */
+  private disposePcmStream(): void {
+    if (!this.pcmStream) return;
+
+    try {
+      this.pcmStream.destroy();
+    } catch (error) {
+      logger.debug(error, 'Error destroying PCM stream');
+    } finally {
+      this.pcmStream = null;
     }
   }
 
@@ -232,22 +254,27 @@ export class ElevenLabsConversationalAI {
 
     logger.info(`Handling client tool call: ${tool} (ID: ${tool_call_id})`);
 
+    const handler = this.toolRegistry.get(tool);
+    if (!handler) {
+      const message = `Error: Unsupported tool '${tool}'.`;
+      logger.warn(message);
+      this.sendToolResponse(tool_call_id, message, true);
+      return;
+    }
+
+    const respond = (output: string, isError: boolean = false) => {
+      this.sendToolResponse(tool_call_id, output, isError);
+    };
+
     try {
-      await handleToolCall(
-        tool,
+      await handler({
         parameters,
-        tool_call_id,
-        {
-          textChannel: this.textChannel,
-          tavily: this.tavily,
-          disconnect: () => this.disconnect(),
-        },
-        (id, output, isError = false) => this.sendToolResponse(id, output, isError)
-      );
+        toolCallId: tool_call_id,
+        respond,
+      });
     } catch (error) {
-      const errorMessage = `An unexpected error occurred while executing tool '${tool}'.`;
-      logger.error(error, `Error handling tool call '${tool}'`);
-      this.sendToolResponse(tool_call_id, errorMessage, true);
+      logger.error(error, `Tool '${tool}' (${tool_call_id}) threw an error`);
+      respond('An error occurred while executing the tool. Please try again later.', true);
     }
   }
 
@@ -296,4 +323,5 @@ export class ElevenLabsConversationalAI {
       logger.info(`User Transcript: "${userTranscriptText}"`);
     }
   }
+
 }
