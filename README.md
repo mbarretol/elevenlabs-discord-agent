@@ -1,18 +1,19 @@
-# ElevenLabs Discord Voicebot
+# ElevenLabs Discord Agent
 
-A Discord bot that enables natural, real-time voice interactions in your server using [ElevenLabs' Conversational WebSocket API](https://elevenlabs.io/docs/conversational-ai/docs/introduction) and the [Discord.js Voice API](https://discordjs.guide/voice/#installation), delivering engaging, voice-driven experiences.
+A Discord bot that enables natural, real-time voice interactions in your server using [ElevenLabs Agent WebSocket API](https://elevenlabs.io/docs/conversational-ai/docs/introduction) and the [Discord.js Voice API](https://discordjs.guide/voice/#installation), delivering engaging, voice-driven experiences.
 
 ## Features
 
 - **Slash Command Support**: Simple `/talk` command interface to initiate voice interactions in any channel.
 - **Real-time Conversations**: WebSocket input and output streaming for low latency voice conversations.
 - **Interruption Handling**: The bot is able to handle interruptions gracefully.
+- **Tool Calling**: Built-in support for ElevenLabs Agent tools. Configure `TAVILY_API_KEY` to enable Tavily-powered web search.
 
 ## Getting Started
 
 ### Prerequisites
 
-- Latest LTS version of Node.js
+- Node.js (LTS recommended)
 - FFmpeg installed on your system
   - Windows: Install via [FFmpeg website](https://ffmpeg.org/download.html)
   - macOS: `brew install ffmpeg`
@@ -51,7 +52,7 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 
    Then copy the generated URL at the bottom, paste it into your browser, and follow the prompts to invite the bot to your server.
 
-7. Go to https://elevenlabs.io/app/conversational-ai to set up your voice agent. Make sure to set the output format of the audio to 48kHz, copy the `AGENT_ID` and fill it in the .env file.
+7. Go to https://elevenlabs.io/app/agents to set up your ElevenLabs Agent. Make sure to set the output format of the audio to 48kHz, copy the `AGENT_ID` and fill it in the .env file.
 
 8. Install dependencies and run the bot.
 
@@ -60,7 +61,7 @@ A Discord bot that enables natural, real-time voice interactions in your server 
    npm start
    ```
 
-9. Once started, the slash commands will be deployed; this process might take a few minutes. Once everything is setup, your bot should appear online and you can use `/talk` for the bot to join the voice channel.
+9. Once started, the slash commands will be deployed. This process might take a few minutes. Once everything is setup, your bot should appear online and you can use `/talk` for the bot to join the voice channel.
    **Note:** You must be in a voice channel for the bot to join.
 
 ## License
