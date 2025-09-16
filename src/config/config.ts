@@ -17,7 +17,10 @@ export const TAVILY_CONFIG = {
   TAVILY_KEY: loadEnv('TAVILY_API_KEY'),
   MAX_RESULTS: 1,
   INCLUDE_ANSWER: true,
-};
+  INCLUDE_IMAGES: true,
+  AUTO_PARAMETERS: true,
+  SEARCH_DEPTH: "basic",
+} as const;
 
 export const ELEVENLABS_CONFIG = {
   AGENT_ID: loadEnv('AGENT_ID'),
