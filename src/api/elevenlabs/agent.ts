@@ -17,14 +17,16 @@ import { ToolRegistry } from './tools/toolRegistry.js';
  * streams audio in and out of Discord, and dispatches tool calls.
  */
 export class Agent {
-  private socket: WebSocket | null = null;
-  private pcmStream: PassThrough | null = null;
+  private socket: WebSocket | null;
+  private pcmStream: PassThrough | null;
   private readonly audioPlayer: AudioPlayer;
   private readonly toolRegistry: ToolRegistry;
 
   constructor(audioPlayer: AudioPlayer, toolRegistry: ToolRegistry) {
     this.audioPlayer = audioPlayer;
     this.toolRegistry = toolRegistry;
+    this.socket = null;
+    this.pcmStream = null;
   }
 
   /**
