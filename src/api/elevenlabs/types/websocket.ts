@@ -25,6 +25,6 @@ export interface ClientToolCallEvent {
   client_tool_call?: {
     tool_name?: string;
     tool_call_id?: string;
-    parameters?: Record<string, any>;
+    parameters?: Record<string, unknown>;
   };
 }
