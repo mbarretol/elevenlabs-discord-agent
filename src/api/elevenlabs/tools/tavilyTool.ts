@@ -6,8 +6,13 @@ import { logger } from '../../../config/logger.js';
 import type { ToolHandler } from '../types/tools.js';
 
 export function createTavilyTool(textChannel: TextChannel): ToolHandler {
+  const apiKey = TAVILY_CONFIG.TAVILY_KEY;
+  if (!apiKey) {
+    throw new Error('Tavily API key is required to initialize the Tavily tool.');
+  }
+
   const client = tavily({
-    apiKey: TAVILY_CONFIG.TAVILY_KEY,
+    apiKey,
   });
 
   return async ({ parameters, respond }) => {

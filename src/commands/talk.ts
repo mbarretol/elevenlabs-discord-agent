@@ -5,6 +5,7 @@ import { Agent } from '../api/elevenlabs/agent.js';
 import { ToolRegistry } from '../api/elevenlabs/tools/toolRegistry.js';
 import { createTavilyTool } from '../api/elevenlabs/tools/tavilyTool.js';
 import { logger } from '../config/logger.js';
+import { TAVILY_CONFIG } from '../config/config.js';
 import { Embeds } from '../utils/embedHelper.js';
 
 export const data = new SlashCommandBuilder()
@@ -55,7 +56,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     const audioPlayer = new AudioPlayer();
     const toolRegistry = new ToolRegistry();
-    toolRegistry.register('web_search', createTavilyTool(textChannel));
+    if (TAVILY_CONFIG.ENABLED) {
+      toolRegistry.register('web_search', createTavilyTool(textChannel));
+    } else {
+      logger.info('Tavily API key not provided. Skipping registration of web_search tool.');
+    }
     const agent = new Agent(audioPlayer, toolRegistry);
 
     const connection = joinVoiceChannel({
