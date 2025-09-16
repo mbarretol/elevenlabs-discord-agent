@@ -9,7 +9,7 @@ import {
   entersState,
 } from '@discordjs/voice';
 import { logger } from '../../config/logger.js';
-import { Agent } from '../elevenlabs/conversationalClient.js';
+import { Agent } from '../elevenlabs/agent.js';
 import { delay } from '../../utils/time.js';
 
 /**

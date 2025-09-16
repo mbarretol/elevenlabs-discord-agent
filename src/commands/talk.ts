@@ -1,7 +1,7 @@
 import { AudioPlayer, joinVoiceChannel, getVoiceConnection } from '@discordjs/voice';
 import { ChannelType, ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { SpeechHandler } from '../api/discord/speech.js';
-import { Agent } from '../api/elevenlabs/conversationalClient.js';
+import { Agent } from '../api/elevenlabs/agent.js';
 import { ToolRegistry } from '../api/elevenlabs/tools/toolRegistry.js';
 import { createTavilyTool } from '../api/elevenlabs/tools/tavilyTool.js';
 import { logger } from '../config/logger.js';
