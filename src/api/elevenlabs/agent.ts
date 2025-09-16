@@ -17,14 +17,14 @@ import { ToolRegistry } from './tools/toolRegistry.js';
  * streams audio in and out of Discord, and dispatches tool calls.
  */
 export class Agent {
-  private url: string;
   private socket: WebSocket | null = null;
   private pcmStream: PassThrough | null = null;
-  constructor(
-    private audioPlayer: AudioPlayer,
-    private toolRegistry: ToolRegistry
-  ) {
-    this.url = `${ELEVENLABS_CONFIG.WS_BASE_URL}?agent_id=${ELEVENLABS_CONFIG.AGENT_ID}`;
+  private readonly audioPlayer: AudioPlayer;
+  private readonly toolRegistry: ToolRegistry;
+
+  constructor(audioPlayer: AudioPlayer, toolRegistry: ToolRegistry) {
+    this.audioPlayer = audioPlayer;
+    this.toolRegistry = toolRegistry;
   }
 
   /**
@@ -39,7 +39,7 @@ export class Agent {
 
     await new Promise<void>((resolve, reject) => {
       logger.info('Connecting to ElevenLabs Agent WebSocket...');
-      this.socket = new WebSocket(this.url, { perMessageDeflate: false });
+      this.socket = new WebSocket(ELEVENLABS_CONFIG.AGENT_WS_URL, { perMessageDeflate: false });
 
       const handleOpen = () => {
         logger.info('Connected to ElevenLabs Agent WebSocket.');

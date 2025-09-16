@@ -22,7 +22,9 @@ export const TAVILY_CONFIG = {
   SEARCH_DEPTH: "basic",
 } as const;
 
+const ELEVENLABS_WS_BASE_URL = 'wss://api.elevenlabs.io/v1/convai/conversation';
+const ELEVENLABS_AGENT_ID = loadEnv('AGENT_ID');
+
 export const ELEVENLABS_CONFIG = {
-  AGENT_ID: loadEnv('AGENT_ID'),
-  WS_BASE_URL: 'wss://api.elevenlabs.io/v1/convai/conversation',
-};
+  AGENT_WS_URL: `${ELEVENLABS_WS_BASE_URL}?agent_id=${ELEVENLABS_AGENT_ID}`,
+} as const;
