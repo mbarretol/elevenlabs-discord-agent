@@ -7,7 +7,7 @@ import {
 } from 'discord.js';
 import { readdirSync } from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { DISCORD_CONFIG } from './config/config.js';
 import { logger } from './config/logger.js';
 import { deployCommands } from './utils/deployCommands.js';
@@ -33,7 +33,8 @@ class Bot extends Client {
   async loadCommands(): Promise<void> {
     const commandsPath = path.join(__dirname, 'commands');
     for (const file of readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
-      const command = await import(`file://${path.join(commandsPath, file)}`);
+      const commandModuleUrl = pathToFileURL(path.join(commandsPath, file)).href;
+      const command = await import(commandModuleUrl);
       if ('data' in command && 'execute' in command) {
         this.commands.set(command.data.name, command);
         logger.info(`Loaded command ${command.data.name}`);
