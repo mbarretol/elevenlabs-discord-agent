@@ -13,13 +13,15 @@ import { Agent } from '../elevenlabs/agent.js';
 import { delay } from '../../utils/time.js';
 
 /**
- * Handles speech processing for users in a voice channel.
+ * Streams Discord voice packets to the ElevenLabs agent and keeps per-user
+ * receive streams healthy while the voice connection is active.
  */
 class SpeechHandler {
   private speakingUsers: Map<string, AudioReceiveStream>;
   private client: Agent;
   private decoder: opus.OpusEncoder;
   private connection: VoiceConnection;
+  private speakingListener?: (userId: string) => void;
 
   /**
    * @param client - ElevenLabs agent that receives PCM chunks.
@@ -40,26 +42,23 @@ class SpeechHandler {
   }
 
   /**
-   * Initializes the speech handler and sets up event listeners.
-   * @returns {Promise<void>} A promise that resolves when initialization is complete.
+   * Connects to ElevenLabs, then wires up voice connection event listeners so
+   * we can subscribe to users as they begin speaking.
    */
   async initialize(): Promise<void> {
-    try {
-      await this.client.connect();
+    await this.client.connect();
 
-      this.connection.receiver.speaking.on('start', (userId: string) => {
-        this.handleUserSpeaking(userId);
-      });
+    this.speakingListener = (userId: string) => {
+      this.handleUserSpeaking(userId);
+    };
 
-      this.connection.on('stateChange', this.handleConnectionStateChange);
-    } catch (error) {
-      logger.error(error, 'Error initializing speech handler');
-    }
+    this.connection.receiver.speaking.on('start', this.speakingListener);
+    this.connection.on('stateChange', this.handleConnectionStateChange);
   }
 
   /**
-   * Handles a user starting to speak.
-   * @param {string} userId - The ID of the user who is speaking.
+   * Creates a receive stream the first time a user speaks during the session.
+   * Subsequent speaking events reuse the existing subscription.
    */
   private handleUserSpeaking(userId: string): void {
     if (this.speakingUsers.has(userId)) return;
@@ -68,9 +67,8 @@ class SpeechHandler {
   }
 
   /**
-   * Creates an audio stream for a user.
-   * @param {string} userId - The ID of the user.
-   * @returns {Promise<void>} A promise that resolves when the audio stream is created.
+   * Subscribes to a user's Opus stream and forwards decoded audio to ElevenLabs
+   * until the stream ends or errors.
    */
   private async createUserAudioStream(userId: string): Promise<void> {
     try {
@@ -78,19 +76,20 @@ class SpeechHandler {
         end: { behavior: EndBehaviorType.Manual },
       });
 
-      this.speakingUsers.set(userId, opusAudioStream);
+      this.registerUserStream(userId, opusAudioStream);
 
       for await (const opusBuffer of opusAudioStream) {
         this.processAudio(opusBuffer);
       }
     } catch (error) {
       logger.error(error, `Error subscribing to user audio: ${userId}`);
+    } finally {
+      this.removeUserStream(userId);
     }
   }
 
   /**
-   * Processes the audio buffer received from a user.
-   * @param {Buffer} opusBuffer - The audio buffer to process.
+   * Decodes an Opus frame and forwards the PCM payload to the agent.
    */
   private processAudio(opusBuffer: Buffer): void {
     try {
@@ -102,21 +101,65 @@ class SpeechHandler {
   }
 
   /**
-   * Cleans up audio streams and disconnects the client.
+   * Detaches listeners, tears down active receive streams, and closes the
+   * ElevenLabs session.
    */
   private cleanup(): void {
-    for (const audioStream of this.speakingUsers.values()) {
-      audioStream.push(null);
-      audioStream.destroy();
+    if (this.speakingListener) {
+      this.connection.receiver.speaking.off('start', this.speakingListener);
+      this.speakingListener = undefined;
     }
-    this.speakingUsers.clear();
+
+    this.connection.off('stateChange', this.handleConnectionStateChange);
+
+    for (const userId of Array.from(this.speakingUsers.keys())) {
+      this.removeUserStream(userId);
+    }
     this.client.disconnect();
   }
 
   /**
-   * Reacts to connection state changes, attempting recovery on transient disconnects.
-   * @param _oldState - Previous voice connection state.
-   * @param newState - Current voice connection state.
+   * Tracks the receive stream for a user and attaches once-only lifecycle
+   * handlers so we can dispose it when it ends.
+   */
+  private registerUserStream(userId: string, stream: AudioReceiveStream): void {
+    this.speakingUsers.set(userId, stream);
+
+    stream.once('end', () => {
+      this.removeUserStream(userId);
+    });
+
+    stream.once('close', () => {
+      this.removeUserStream(userId);
+    });
+
+    stream.once('error', error => {
+      logger.error(error, `Audio stream error for user: ${userId}`);
+      this.removeUserStream(userId);
+    });
+  }
+
+  /**
+   * Removes the stored stream for the user and destroys the underlying
+   * `AudioReceiveStream`.
+   */
+  private removeUserStream(userId: string): void {
+    const stream = this.speakingUsers.get(userId);
+    if (!stream) return;
+
+    this.speakingUsers.delete(userId);
+
+    stream.removeAllListeners();
+    try {
+      stream.destroy();
+    } catch (error) {
+      logger.debug(error, `Error destroying audio stream for user: ${userId}`);
+    }
+  }
+
+  /**
+   * Reacts to connection state changes, attempting limited reconnects before
+   * giving up and cleaning up resources.
    */
   private handleConnectionStateChange = async (
     _oldState: VoiceConnectionState,
