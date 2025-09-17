@@ -1,7 +1,7 @@
 import { REST, Routes } from 'discord.js';
 import { readdirSync } from 'fs';
 import path, { dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { DISCORD_CONFIG } from '../config/config.js';
 import { logger } from '../config/logger.js';
 
@@ -22,7 +22,8 @@ export async function deployCommands(): Promise<void> {
     for (const file of readdirSync(commandsPath)) {
       if (!file.endsWith('.js')) continue;
 
-      const command = await import(`${commandsPath}/${file}`);
+      const commandModuleUrl = pathToFileURL(path.join(commandsPath, file)).href;
+      const command = await import(commandModuleUrl);
 
       if (!('data' in command) || !('execute' in command)) {
         logger.info(`The command at ${file} is missing a required "data" or "execute" property.`);
