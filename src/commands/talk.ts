@@ -54,6 +54,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       return;
     }
 
+    await interaction.deferReply();
+
     const audioPlayer = new AudioPlayer();
     const toolRegistry = new ToolRegistry();
     if (TAVILY_CONFIG.ENABLED) {
@@ -71,20 +73,48 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       selfMute: false,
     });
 
-    connection.subscribe(audioPlayer);
+    let initialized = false;
 
-    await interaction.reply({
-      embeds: [Embeds.success('Connected', "Let's chat!")],
-    });
+    try {
+      connection.subscribe(audioPlayer);
 
-    const speechHandler = new SpeechHandler(agent, connection);
-    await speechHandler.initialize();
+      const speechHandler = new SpeechHandler(agent, connection);
+      await speechHandler.initialize();
+
+      await interaction.editReply({
+        embeds: [Embeds.success('Connected', "Let's chat!")],
+      });
+
+      initialized = true;
+    } finally {
+      if (!initialized) {
+        connection.destroy();
+        audioPlayer.stop();
+        agent.disconnect();
+      }
+    }
   } catch (error) {
-    logger.error(error, 'Something went wrong during voice mode');
+    logger.error(error, 'Failed to start ElevenLabs voice session');
 
-    await safeReply({
-      embeds: [Embeds.error('Error', 'An error occurred while starting the voice chat.')],
-      ephemeral: true,
-    });
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply({
+        embeds: [
+          Embeds.error(
+            'Voice Session Failed',
+            "Couldn't start the live conversation. Please try again in a moment."
+          ),
+        ],
+      });
+    } else {
+      await safeReply({
+        embeds: [
+          Embeds.error(
+            'Voice Session Failed',
+            "Couldn't start the live conversation. Please try again in a moment."
+          ),
+        ],
+        ephemeral: true,
+      });
+    }
   }
 }
