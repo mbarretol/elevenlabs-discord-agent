@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "start": "npm run build && node dist/bot.js",
+    "test": "npm run build && node --test",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "lint": "eslint . --cache",

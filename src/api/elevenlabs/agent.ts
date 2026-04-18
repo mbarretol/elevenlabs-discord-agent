@@ -1,7 +1,8 @@
 import { AudioPlayer, createAudioResource, StreamType } from '@discordjs/voice';
 import WebSocket from 'ws';
+import { EventEmitter } from 'events';
 import { logger } from '../../config/logger.js';
-import { ELEVENLABS_CONFIG } from '../../config/config.js';
+import { ELEVENLABS_CONFIG, shouldLogConversationText } from '../../config/config.js';
 import type {
   AgentResponseEvent,
   AudioEvent,
@@ -16,13 +17,14 @@ import { ToolRegistry } from './tools/toolRegistry.js';
  * Orchestrates the ElevenLabs Agent, maintains the WebSocket session,
  * streams audio in and out of Discord, and dispatches tool calls.
  */
-export class Agent {
+export class Agent extends EventEmitter {
   private socket: WebSocket | null;
   private pcmStream: PassThrough | null;
   private readonly audioPlayer: AudioPlayer;
   private readonly toolRegistry: ToolRegistry;
 
   constructor(audioPlayer: AudioPlayer, toolRegistry: ToolRegistry) {
+    super();
     this.audioPlayer = audioPlayer;
     this.toolRegistry = toolRegistry;
     this.socket = null;
@@ -60,13 +62,24 @@ export class Agent {
       this.socket?.once('open', handleOpen);
       this.socket?.once('error', handleError);
 
-      this.socket?.on('close', (code: number, reason: Buffer) => {
-        logger.info(`ElevenLabs Agent WebSocket closed with code ${code}. Reason: ${reason.toString()}`);
-        this.cleanup();
-      });
+      this.socket?.on('close', (code: number, reason: Buffer) =>
+        this.handleSocketClose(code, reason)
+      );
 
       this.socket?.on('message', message => this.handleEvent(message));
     });
+  }
+
+  /**
+   * Handles remote WebSocket closure and notifies listeners so the Discord voice
+   * session can be torn down as well.
+   */
+  private handleSocketClose(code: number, reason: Buffer): void {
+    logger.info(
+      `ElevenLabs Agent WebSocket closed with code ${code}. Reason: ${reason.toString()}`
+    );
+    this.cleanup();
+    this.emit('disconnect');
   }
 
   /**
@@ -311,7 +324,11 @@ export class Agent {
   private handleAgentResponse(event: AgentResponseEvent): void {
     const agentResponseText = event.agent_response_event?.agent_response;
     if (agentResponseText && typeof agentResponseText === 'string' && agentResponseText.trim()) {
-      logger.info(`Agent Response: ${agentResponseText}`);
+      if (shouldLogConversationText()) {
+        logger.info(`Agent Response: ${agentResponseText}`);
+      } else {
+        logger.info('Agent response received.');
+      }
     }
   }
 
@@ -322,8 +339,11 @@ export class Agent {
   private handleUserTranscript(event: UserTranscriptEvent): void {
     const userTranscriptText = event.user_transcription_event?.user_transcript;
     if (userTranscriptText && typeof userTranscriptText === 'string' && userTranscriptText.trim()) {
-      logger.info(`User Transcript: "${userTranscriptText}"`);
+      if (shouldLogConversationText()) {
+        logger.info(`User Transcript: "${userTranscriptText}"`);
+      } else {
+        logger.info('User transcript received.');
+      }
     }
   }
-
 }

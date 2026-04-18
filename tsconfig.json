@@ -1,14 +1,14 @@
 {
   "compilerOptions": {
     "target": "es2021",
-    "module": "ESNext",
+    "module": "NodeNext",
     "lib": ["es2021"],
     "declaration": false,
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
-    "moduleResolution": "node",
+    "moduleResolution": "NodeNext",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true

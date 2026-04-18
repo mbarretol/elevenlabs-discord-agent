@@ -29,7 +29,7 @@ export const TAVILY_CONFIG = {
   INCLUDE_ANSWER: true,
   INCLUDE_IMAGES: true,
   AUTO_PARAMETERS: true,
-  SEARCH_DEPTH: "basic",
+  SEARCH_DEPTH: 'basic',
   ENABLED: Boolean(TAVILY_KEY),
 } as const;
 
@@ -39,3 +39,10 @@ const ELEVENLABS_AGENT_ID = loadEnv('AGENT_ID');
 export const ELEVENLABS_CONFIG = {
   AGENT_WS_URL: `${ELEVENLABS_WS_BASE_URL}?agent_id=${ELEVENLABS_AGENT_ID}`,
 } as const;
+
+export function shouldLogConversationText(): boolean {
+  const value = loadOptionalEnv('LOG_CONVERSATION_TEXT');
+  if (!value) return false;
+
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+}

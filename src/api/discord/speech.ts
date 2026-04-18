@@ -18,10 +18,14 @@ import { delay } from '../../utils/time.js';
  */
 class SpeechHandler {
   private speakingUsers: Map<string, AudioReceiveStream>;
+  private activeSpeakerId: string | null;
+  private isCleaningUp: boolean;
   private client: Agent;
   private decoder: opus.OpusEncoder;
   private connection: VoiceConnection;
-  private speakingListener?: (userId: string) => void;
+  private speakingStartListener?: (userId: string) => void;
+  private speakingEndListener?: (userId: string) => void;
+  private agentDisconnectListener?: () => void;
 
   /**
    * @param client - ElevenLabs agent that receives PCM chunks.
@@ -29,13 +33,10 @@ class SpeechHandler {
    * @param sampleRate - PCM sample rate expected by ElevenLabs (defaults to 16 kHz).
    * @param channels - Number of channels to decode to (defaults to mono).
    */
-  constructor(
-    client: Agent,
-    connection: VoiceConnection,
-    sampleRate = 16000,
-    channels = 1
-  ) {
+  constructor(client: Agent, connection: VoiceConnection, sampleRate = 16000, channels = 1) {
     this.speakingUsers = new Map();
+    this.activeSpeakerId = null;
+    this.isCleaningUp = false;
     this.client = client;
     this.decoder = new opus.OpusEncoder(sampleRate, channels);
     this.connection = connection;
@@ -48,12 +49,21 @@ class SpeechHandler {
   async initialize(): Promise<void> {
     await this.client.connect();
 
-    this.speakingListener = (userId: string) => {
+    this.speakingStartListener = (userId: string) => {
       this.handleUserSpeaking(userId);
     };
+    this.speakingEndListener = (userId: string) => {
+      this.handleUserStoppedSpeaking(userId);
+    };
+    this.agentDisconnectListener = () => {
+      logger.warn('ElevenLabs agent disconnected. Destroying voice connection.');
+      this.connection.destroy();
+    };
 
-    this.connection.receiver.speaking.on('start', this.speakingListener);
+    this.connection.receiver.speaking.on('start', this.speakingStartListener);
+    this.connection.receiver.speaking.on('end', this.speakingEndListener);
     this.connection.on('stateChange', this.handleConnectionStateChange);
+    this.client.on('disconnect', this.agentDisconnectListener);
   }
 
   /**
@@ -61,9 +71,21 @@ class SpeechHandler {
    * Subsequent speaking events reuse the existing subscription.
    */
   private handleUserSpeaking(userId: string): void {
-    if (this.speakingUsers.has(userId)) return;
+    if (this.isCleaningUp || this.speakingUsers.has(userId)) return;
+    if (this.activeSpeakerId && this.activeSpeakerId !== userId) return;
 
+    this.activeSpeakerId = userId;
     this.createUserAudioStream(userId);
+  }
+
+  /**
+   * Ends the current user's manual receive stream so another active speaker can
+   * take over the session.
+   */
+  private handleUserStoppedSpeaking(userId: string): void {
+    if (this.activeSpeakerId !== userId) return;
+
+    this.removeUserStream(userId);
   }
 
   /**
@@ -105,12 +127,24 @@ class SpeechHandler {
    * ElevenLabs session.
    */
   private cleanup(): void {
-    if (this.speakingListener) {
-      this.connection.receiver.speaking.off('start', this.speakingListener);
-      this.speakingListener = undefined;
+    if (this.isCleaningUp) return;
+    this.isCleaningUp = true;
+
+    if (this.speakingStartListener) {
+      this.connection.receiver.speaking.off('start', this.speakingStartListener);
+      this.speakingStartListener = undefined;
+    }
+
+    if (this.speakingEndListener) {
+      this.connection.receiver.speaking.off('end', this.speakingEndListener);
+      this.speakingEndListener = undefined;
     }
 
     this.connection.off('stateChange', this.handleConnectionStateChange);
+    if (this.agentDisconnectListener) {
+      this.client.off('disconnect', this.agentDisconnectListener);
+      this.agentDisconnectListener = undefined;
+    }
 
     for (const userId of Array.from(this.speakingUsers.keys())) {
       this.removeUserStream(userId);
@@ -148,12 +182,35 @@ class SpeechHandler {
     if (!stream) return;
 
     this.speakingUsers.delete(userId);
+    const shouldSwitchSpeaker = this.activeSpeakerId === userId;
+    if (shouldSwitchSpeaker) {
+      this.activeSpeakerId = null;
+    }
 
     stream.removeAllListeners();
     try {
       stream.destroy();
     } catch (error) {
       logger.debug(error, `Error destroying audio stream for user: ${userId}`);
+    }
+
+    if (shouldSwitchSpeaker) {
+      this.subscribeNextSpeakingUser();
+    }
+  }
+
+  /**
+   * When the active speaker stops, hand off the single upstream ElevenLabs
+   * session to another member who is currently speaking.
+   */
+  private subscribeNextSpeakingUser(): void {
+    if (this.isCleaningUp || this.activeSpeakerId) return;
+
+    for (const userId of this.connection.receiver.speaking.users.keys()) {
+      if (this.speakingUsers.has(userId)) continue;
+
+      this.handleUserSpeaking(userId);
+      break;
     }
   }
 
