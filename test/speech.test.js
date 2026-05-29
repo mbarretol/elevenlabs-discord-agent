@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { EndBehaviorType } from '@discordjs/voice';
 
 process.env.DISCORD_BOT_TOKEN ??= 'test-token';
 process.env.DISCORD_CLIENT_ID ??= 'test-client';
@@ -16,6 +17,7 @@ class FakeSpeakingMap extends EventEmitter {
 function createConnection() {
   const speaking = new FakeSpeakingMap();
   const subscriptions = new Map();
+  const subscriptionOptions = new Map();
   const stateListeners = new Set();
   let destroyCount = 0;
 
@@ -36,9 +38,10 @@ function createConnection() {
       },
       receiver: {
         speaking,
-        subscribe(userId) {
+        subscribe(userId, options) {
           const stream = new PassThrough();
           subscriptions.set(userId, stream);
+          subscriptionOptions.set(userId, options);
           return stream;
         },
       },
@@ -46,6 +49,7 @@ function createConnection() {
     },
     destroyCount: () => destroyCount,
     getStream: userId => subscriptions.get(userId),
+    getSubscriptionOptions: userId => subscriptionOptions.get(userId),
     subscriptions,
   };
 }
@@ -74,9 +78,9 @@ test('SpeechHandler destroys the voice connection when the agent disconnects', a
   assert.equal(destroyCount(), 1);
 });
 
-test('SpeechHandler switches the upstream stream when speakers overlap', async () => {
+test('SpeechHandler keeps the active receive stream alive for the session', async () => {
   const agent = createAgent();
-  const { connection, getStream, subscriptions } = createConnection();
+  const { connection, getStream, getSubscriptionOptions, subscriptions } = createConnection();
   const handler = new SpeechHandler(agent, connection);
 
   handler.decoder = { decode: buffer => buffer };
@@ -89,6 +93,7 @@ test('SpeechHandler switches the upstream stream when speakers overlap', async (
 
   const firstStream = getStream('user-1');
   assert.ok(firstStream);
+  assert.equal(getSubscriptionOptions('user-1').end.behavior, EndBehaviorType.Manual);
 
   firstStream.write(Buffer.from('speaker-one'));
   await new Promise(resolve => setImmediate(resolve));
@@ -104,11 +109,19 @@ test('SpeechHandler switches the upstream stream when speakers overlap', async (
   connection.receiver.speaking.emit('end', 'user-1');
   await new Promise(resolve => setImmediate(resolve));
 
-  const secondStream = getStream('user-2');
-  assert.ok(secondStream);
+  assert.equal(firstStream.destroyed, false);
+  assert.equal(getStream('user-1'), firstStream);
+  assert.equal(subscriptions.has('user-2'), false);
 
-  secondStream.write(Buffer.from('speaker-two'));
+  connection.receiver.speaking.users.set('user-1', Date.now());
+  connection.receiver.speaking.emit('start', 'user-1');
   await new Promise(resolve => setImmediate(resolve));
 
+  assert.equal(getStream('user-1'), firstStream);
+
+  firstStream.write(Buffer.from('speaker-two'));
+  await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(agent.appendedAudio, ['speaker-one', 'speaker-two']);
+
+  firstStream.destroy();
 });
