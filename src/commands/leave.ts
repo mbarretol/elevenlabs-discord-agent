@@ -3,19 +3,10 @@ import { getVoiceConnection } from '@discordjs/voice';
 import { logger } from '../config/logger.js';
 import { Embeds } from '../utils/embedHelper.js';
 
-/**
- * Represents the structure of the leave command using native SlashCommandBuilder.
- */
 export const data = new SlashCommandBuilder()
   .setName('leave')
-  .setDescription('Disconnects Voicebot from the voice channel.');
+  .setDescription('Disconnects the client from the voice channel.');
 
-/**
- * Executes the leave command.
- *
- * @param {CommandInteraction} interaction - The interaction object representing the command execution.
- * @returns {Promise<void>}
- */
 export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     await interaction.deferReply();

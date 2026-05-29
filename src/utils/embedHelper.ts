@@ -8,24 +8,12 @@ const presetColors: Record<PresetType, ColorResolvable> = {
   info: 'Blue',
 };
 
-/**
- * Creates an embed message.
- * @param {string} title - The title of the embed.
- * @param {string} [description] - The description of the embed.
- * @param {PresetType} [type] - The preset type for the embed color.
- * @param {ColorResolvable} [color] - Custom color for the embed.
- * @returns {EmbedBuilder} The created embed builder instance.
- */
 function createEmbed(
   title: string,
-  description?: string,
-  type?: PresetType,
-  color?: ColorResolvable
+  description: string | undefined,
+  type: PresetType
 ): EmbedBuilder {
-  const embed = new EmbedBuilder()
-    .setColor(type ? presetColors[type] : color || 0x0099ff)
-    .setTitle(title)
-    .setTimestamp();
+  const embed = new EmbedBuilder().setColor(presetColors[type]).setTitle(title).setTimestamp();
 
   if (description) {
     embed.setDescription(description);

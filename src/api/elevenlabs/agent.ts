@@ -9,26 +9,30 @@ import type {
   ClientToolCallEvent,
   UserTranscriptEvent,
 } from './types/websocket.js';
-import { base64MonoPcmToStereo } from '../../utils/audioUtils.js';
+import { monoPcm48kToStereo } from '../../utils/audioUtils.js';
 import { PassThrough } from 'stream';
-import { ToolRegistry } from './tools/toolRegistry.js';
 
 /**
  * Orchestrates the ElevenLabs Agent, maintains the WebSocket session,
- * streams audio in and out of Discord, and dispatches tool calls.
+ * and streams audio in and out of Discord.
  */
 export class Agent extends EventEmitter {
-  private socket: WebSocket | null;
-  private pcmStream: PassThrough | null;
+  private socket: WebSocket | null = null;
+  private pcmStream: PassThrough | null = null;
   private readonly audioPlayer: AudioPlayer;
-  private readonly toolRegistry: ToolRegistry;
+  private readonly audioPlayerErrorListener = (error: Error) => {
+    logger.error(error, 'AudioPlayer error encountered, ending current PCM stream');
+    this.disposePcmStream();
+  };
+  private readonly socketCloseListener = (code: number, reason: Buffer) =>
+    this.handleSocketClose(code, reason);
+  private readonly socketMessageListener = (message: WebSocket.RawData) => {
+    void this.handleEvent(message);
+  };
 
-  constructor(audioPlayer: AudioPlayer, toolRegistry: ToolRegistry) {
+  constructor(audioPlayer: AudioPlayer) {
     super();
     this.audioPlayer = audioPlayer;
-    this.toolRegistry = toolRegistry;
-    this.socket = null;
-    this.pcmStream = null;
   }
 
   /**
@@ -36,37 +40,34 @@ export class Agent extends EventEmitter {
    * @returns A promise that resolves when the connection is open, or rejects on error.
    */
   public async connect(): Promise<void> {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      logger.debug('Tried to connect while socket already open; reusing existing connection.');
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      logger.debug('Tried to connect while socket already open, reusing existing connection.');
       return;
     }
 
     await new Promise<void>((resolve, reject) => {
       logger.info('Connecting to ElevenLabs Agent WebSocket...');
-      this.socket = new WebSocket(ELEVENLABS_CONFIG.AGENT_WS_URL, { perMessageDeflate: false });
+      const socket = new WebSocket(ELEVENLABS_CONFIG.AGENT_WS_URL, { perMessageDeflate: false });
+      this.socket = socket;
 
       const handleOpen = () => {
         logger.info('Connected to ElevenLabs Agent WebSocket.');
-        this.socket?.removeListener('error', handleError);
+        socket.off('error', handleError);
         this.bindAudioPlayerEvents();
         resolve();
       };
 
       const handleError = (error: Error) => {
         logger.error(error, 'ElevenLabs Agent WebSocket encountered an error');
-        this.socket?.removeListener('open', handleOpen);
+        socket.off('open', handleOpen);
         this.audioPlayer.stop();
         reject(new Error(`Error during ElevenLabs Agent WebSocket connection: ${error.message}`));
       };
 
-      this.socket?.once('open', handleOpen);
-      this.socket?.once('error', handleError);
-
-      this.socket?.on('close', (code: number, reason: Buffer) =>
-        this.handleSocketClose(code, reason)
-      );
-
-      this.socket?.on('message', message => this.handleEvent(message));
+      socket.once('open', handleOpen);
+      socket.once('error', handleError);
+      socket.on('close', this.socketCloseListener);
+      socket.on('message', this.socketMessageListener);
     });
   }
 
@@ -83,7 +84,7 @@ export class Agent extends EventEmitter {
   }
 
   /**
-   * Cleans up WebSocket resources by closing the connection and removing all listeners.
+   * Cleans up WebSocket and playback resources.
    */
   private cleanup(): void {
     logger.info('Cleaning up ElevenLabs resources...');
@@ -104,11 +105,8 @@ export class Agent extends EventEmitter {
    * Registers error handling on the Discord audio player to keep the PCM stream healthy.
    */
   private bindAudioPlayerEvents(): void {
-    this.audioPlayer.removeAllListeners();
-    this.audioPlayer.on('error', error => {
-      logger.error(error, 'AudioPlayer error encountered, ending current PCM stream');
-      this.disposePcmStream();
-    });
+    this.audioPlayer.off('error', this.audioPlayerErrorListener);
+    this.audioPlayer.on('error', this.audioPlayerErrorListener);
   }
 
   /**
@@ -142,7 +140,7 @@ export class Agent extends EventEmitter {
       const b64 = message.audio_event?.audio_base_64;
       if (!b64) return;
 
-      const stereoBuf = base64MonoPcmToStereo(b64);
+      const stereoBuf = monoPcm48kToStereo(b64);
       if (!stereoBuf.byteLength) return;
 
       const { stream, isNew } = this.getOrCreatePcmStream();
@@ -174,23 +172,18 @@ export class Agent extends EventEmitter {
   }
 
   /**
-   * Closes the WebSocket connection and removes all listeners.
+   * Closes the WebSocket connection and removes Agent-owned listeners.
    */
   private closeSocket(): void {
     if (!this.socket) return;
 
-    try {
-      if (
-        this.socket.readyState === WebSocket.OPEN ||
-        this.socket.readyState === WebSocket.CONNECTING
-      ) {
-        this.socket.close();
-      }
-    } catch (error) {
-      logger.debug(error, 'Error closing WebSocket');
-    } finally {
-      this.socket.removeAllListeners();
-      this.socket = null;
+    const socket = this.socket;
+    this.socket = null;
+    socket.off('close', this.socketCloseListener);
+    socket.off('message', this.socketMessageListener);
+
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close();
     }
   }
 
@@ -200,13 +193,8 @@ export class Agent extends EventEmitter {
   private disposePcmStream(): void {
     if (!this.pcmStream) return;
 
-    try {
-      this.pcmStream.destroy();
-    } catch (error) {
-      logger.debug(error, 'Error destroying PCM stream');
-    } finally {
-      this.pcmStream = null;
-    }
+    this.pcmStream.destroy();
+    this.pcmStream = null;
   }
 
   /**
@@ -236,7 +224,7 @@ export class Agent extends EventEmitter {
           this.handleInterruption();
           break;
         case 'client_tool_call':
-          await this.handleClientToolCall(event as ClientToolCallEvent);
+          this.handleClientToolCall(event as ClientToolCallEvent);
           break;
         default:
           logger.debug(`Received unhandled WebSocket event type: ${event.type}`);
@@ -249,18 +237,14 @@ export class Agent extends EventEmitter {
     }
   }
 
-  /**
-   * Handles `client_tool_call` events by executing the requested tool and replying with a
-   * `client_tool_result` event.
-   */
-  private async handleClientToolCall(event: ClientToolCallEvent): Promise<void> {
+  private handleClientToolCall(event: ClientToolCallEvent): void {
     const toolCall = event.client_tool_call;
     if (!toolCall) {
       logger.warn("Received client_tool_call event with no 'client_tool_call' details.");
       return;
     }
 
-    const { tool_name: tool, parameters, tool_call_id } = toolCall;
+    const { tool_name: tool, tool_call_id } = toolCall;
 
     if (!tool || !tool_call_id) {
       logger.warn("Received client_tool_call event without 'tool_name' or 'tool_call_id'.");
@@ -268,29 +252,9 @@ export class Agent extends EventEmitter {
     }
 
     logger.info(`Handling client tool call: ${tool} (ID: ${tool_call_id})`);
-
-    const handler = this.toolRegistry.get(tool);
-    if (!handler) {
-      const message = `Error: Unsupported tool '${tool}'.`;
-      logger.warn(message);
-      this.sendToolResponse(tool_call_id, message, true);
-      return;
-    }
-
-    const respond = (output: string, isError: boolean = false) => {
-      this.sendToolResponse(tool_call_id, output, isError);
-    };
-
-    try {
-      await handler({
-        parameters,
-        toolCallId: tool_call_id,
-        respond,
-      });
-    } catch (error) {
-      logger.error(error, `Tool '${tool}' (${tool_call_id}) threw an error`);
-      respond('An error occurred while executing the tool. Please try again later.', true);
-    }
+    const message = `Error: Unsupported tool '${tool}'.`;
+    logger.warn(message);
+    this.sendToolResponse(tool_call_id, message, true);
   }
 
   /**
@@ -317,33 +281,33 @@ export class Agent extends EventEmitter {
     logger.info(`Sent tool response for ${toolCallId} (isError: ${isError}).`);
   }
 
-  /**
-   * Handles agent response events, logging the agent's response text.
-   * @param event - The AgentResponseEvent containing the agent's response.
-   */
   private handleAgentResponse(event: AgentResponseEvent): void {
-    const agentResponseText = event.agent_response_event?.agent_response;
-    if (agentResponseText && typeof agentResponseText === 'string' && agentResponseText.trim()) {
-      if (shouldLogConversationText()) {
-        logger.info(`Agent Response: ${agentResponseText}`);
-      } else {
-        logger.info('Agent response received.');
-      }
-    }
+    this.logConversationText(
+      event.agent_response_event?.agent_response,
+      'Agent response received.',
+      text => `Agent Response: ${text}`
+    );
   }
 
-  /**
-   * Handles user transcript events, logging the user's transcribed text.
-   * @param event - The UserTranscriptEvent containing the user's transcript.
-   */
   private handleUserTranscript(event: UserTranscriptEvent): void {
-    const userTranscriptText = event.user_transcription_event?.user_transcript;
-    if (userTranscriptText && typeof userTranscriptText === 'string' && userTranscriptText.trim()) {
-      if (shouldLogConversationText()) {
-        logger.info(`User Transcript: "${userTranscriptText}"`);
-      } else {
-        logger.info('User transcript received.');
-      }
+    this.logConversationText(
+      event.user_transcription_event?.user_transcript,
+      'User transcript received.',
+      text => `User Transcript: "${text}"`
+    );
+  }
+
+  private logConversationText(
+    text: unknown,
+    privateMessage: string,
+    formatRawMessage: (text: string) => string
+  ): void {
+    if (typeof text !== 'string' || !text.trim()) return;
+
+    if (shouldLogConversationText()) {
+      logger.info(formatRawMessage(text));
+    } else {
+      logger.info(privateMessage);
     }
   }
 }

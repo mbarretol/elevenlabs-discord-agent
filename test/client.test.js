@@ -5,13 +5,17 @@ process.env.DISCORD_BOT_TOKEN ??= 'test-token';
 process.env.DISCORD_CLIENT_ID ??= 'test-client';
 process.env.AGENT_ID ??= 'test-agent';
 
-const { Bot } = await import('../dist/botClient.js');
+const { commandMap } = await import('../dist/commands/index.js');
+const { handleCommand } = await import('../dist/api/discord/client.js');
 
-test('Bot.handleCommand replies when the requested command is unavailable', async () => {
-  const bot = new Bot({ intents: [] });
+test('command registry exposes the supported slash commands', () => {
+  assert.deepEqual([...commandMap.keys()].sort(), ['leave', 'talk']);
+});
+
+test('handleCommand replies when the requested command is unavailable', async () => {
   const replies = [];
   const interaction = {
-    commandName: 'talk',
+    commandName: 'missing',
     deferred: false,
     replied: false,
     followUp: async payload => {
@@ -22,17 +26,15 @@ test('Bot.handleCommand replies when the requested command is unavailable', asyn
     },
   };
 
-  await bot.handleCommand(interaction);
+  await handleCommand(interaction);
 
   assert.deepEqual(replies, [
     {
       method: 'reply',
       payload: {
         content: 'This command is currently unavailable. Please try again in a moment.',
-        ephemeral: true,
+        flags: 64,
       },
     },
   ]);
-
-  bot.destroy();
 });

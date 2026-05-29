@@ -9,20 +9,22 @@ process.env.AGENT_ID ??= 'test-agent';
 
 const { Agent } = await import('../dist/api/elevenlabs/agent.js');
 
-test('Agent emits disconnect when the websocket closes remotely', () => {
-  const audioPlayer = {
+function createAudioPlayer() {
+  return {
+    off() {},
     on() {},
     play() {},
-    removeAllListeners() {},
     stop() {},
   };
-  const toolRegistry = { get() {} };
-  const agent = new Agent(audioPlayer, toolRegistry);
+}
+
+test('Agent emits disconnect when the websocket closes remotely', () => {
+  const agent = new Agent(createAudioPlayer());
 
   agent.socket = {
     close() {},
+    off() {},
     readyState: 1,
-    removeAllListeners() {},
   };
   agent.pcmStream = new PassThrough();
 
@@ -39,14 +41,7 @@ test('Agent emits disconnect when the websocket closes remotely', () => {
 });
 
 test('Agent does not log raw conversation text unless explicitly enabled', () => {
-  const audioPlayer = {
-    on() {},
-    play() {},
-    removeAllListeners() {},
-    stop() {},
-  };
-  const toolRegistry = { get() {} };
-  const agent = new Agent(audioPlayer, toolRegistry);
+  const agent = new Agent(createAudioPlayer());
   const originalInfo = logger.info;
   const messages = [];
 
@@ -73,14 +68,7 @@ test('Agent does not log raw conversation text unless explicitly enabled', () =>
 });
 
 test('Agent logs raw conversation text when LOG_CONVERSATION_TEXT is enabled', () => {
-  const audioPlayer = {
-    on() {},
-    play() {},
-    removeAllListeners() {},
-    stop() {},
-  };
-  const toolRegistry = { get() {} };
-  const agent = new Agent(audioPlayer, toolRegistry);
+  const agent = new Agent(createAudioPlayer());
   const originalInfo = logger.info;
   const messages = [];
 

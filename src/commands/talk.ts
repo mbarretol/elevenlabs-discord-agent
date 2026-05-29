@@ -1,120 +1,74 @@
 import { AudioPlayer, joinVoiceChannel, getVoiceConnection } from '@discordjs/voice';
-import { ChannelType, ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import { ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { SpeechHandler } from '../api/discord/speech.js';
 import { Agent } from '../api/elevenlabs/agent.js';
-import { ToolRegistry } from '../api/elevenlabs/tools/toolRegistry.js';
-import { createTavilyTool } from '../api/elevenlabs/tools/tavilyTool.js';
 import { logger } from '../config/logger.js';
-import { TAVILY_CONFIG } from '../config/config.js';
 import { Embeds } from '../utils/embedHelper.js';
 
 export const data = new SlashCommandBuilder()
   .setName('talk')
-  .setDescription('Unleash an auditory adventure with a voice that echoes from the digital realm.');
+  .setDescription('Start a voice conversation.');
 
-/**
- * Executes the talk command.
- *
- * @param {ChatInputCommandInteraction} interaction - The interaction object representing the command execution.
- * @returns {Promise<void>}
- */
+const START_FAILED = "Couldn't start the live conversation. Please try again in a moment.";
+
+async function replyWithError(
+  interaction: ChatInputCommandInteraction,
+  message: string
+): Promise<void> {
+  await interaction.reply({
+    embeds: [Embeds.error('Error', message)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  const safeReply = async (payload: Parameters<typeof interaction.reply>[0]) => {
-    if (interaction.deferred || interaction.replied) {
-      await interaction.followUp(payload);
-    } else {
-      await interaction.reply(payload);
-    }
-  };
+  if (!interaction.inCachedGuild()) {
+    return replyWithError(interaction, 'This command can only be used within a guild.');
+  }
 
-  const replyWithError = async (message: string) =>
-    safeReply({ embeds: [Embeds.error('Error', message)], ephemeral: true });
+  const voiceChannel = interaction.member.voice.channel;
+
+  if (!voiceChannel) {
+    return replyWithError(interaction, 'You need to be in a voice channel to use this command.');
+  }
+
+  if (getVoiceConnection(voiceChannel.guild.id)) {
+    return replyWithError(interaction, 'Client is already in a voice channel.');
+  }
+
+  await interaction.deferReply();
+
+  let cleanup = () => {};
 
   try {
-    if (!interaction.inCachedGuild()) {
-      await replyWithError('This command can only be used within a guild.');
-      return;
-    }
-
-    if (!interaction.channel || interaction.channel.type !== ChannelType.GuildText) {
-      await replyWithError('This command can only be used in text channels.');
-      return;
-    }
-
-    const textChannel = interaction.channel;
-    const voiceChannel = interaction.member.voice.channel;
-
-    if (!voiceChannel) {
-      await replyWithError('You need to be in a voice channel to use this command.');
-      return;
-    }
-
-    if (getVoiceConnection(interaction.guildId!)) {
-      await replyWithError('Bot is already in a voice channel.');
-      return;
-    }
-
-    await interaction.deferReply();
-
     const audioPlayer = new AudioPlayer();
-    const toolRegistry = new ToolRegistry();
-    if (TAVILY_CONFIG.ENABLED) {
-      toolRegistry.register('web_search', createTavilyTool(textChannel));
-    } else {
-      logger.info('Tavily API key not provided. Skipping registration of web_search tool.');
-    }
-    const agent = new Agent(audioPlayer, toolRegistry);
-
+    const agent = new Agent(audioPlayer);
     const connection = joinVoiceChannel({
+      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
       channelId: voiceChannel.id,
-      guildId: interaction.guildId!,
-      adapterCreator: interaction.guild.voiceAdapterCreator,
+      guildId: voiceChannel.guild.id,
       selfDeaf: false,
       selfMute: false,
     });
 
-    let initialized = false;
+    cleanup = () => {
+      connection.destroy();
+      audioPlayer.stop();
+      agent.disconnect();
+    };
 
-    try {
-      connection.subscribe(audioPlayer);
+    connection.subscribe(audioPlayer);
+    await new SpeechHandler(agent, connection).initialize();
 
-      const speechHandler = new SpeechHandler(agent, connection);
-      await speechHandler.initialize();
-
-      await interaction.editReply({
-        embeds: [Embeds.success('Connected', "Let's chat!")],
-      });
-
-      initialized = true;
-    } finally {
-      if (!initialized) {
-        connection.destroy();
-        audioPlayer.stop();
-        agent.disconnect();
-      }
-    }
+    await interaction.editReply({
+      embeds: [Embeds.success('Connected', "Let's chat!")],
+    });
   } catch (error) {
+    cleanup();
     logger.error(error, 'Failed to start ElevenLabs voice session');
 
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply({
-        embeds: [
-          Embeds.error(
-            'Voice Session Failed',
-            "Couldn't start the live conversation. Please try again in a moment."
-          ),
-        ],
-      });
-    } else {
-      await safeReply({
-        embeds: [
-          Embeds.error(
-            'Voice Session Failed',
-            "Couldn't start the live conversation. Please try again in a moment."
-          ),
-        ],
-        ephemeral: true,
-      });
-    }
+    await interaction.editReply({
+      embeds: [Embeds.error('Voice Session Failed', START_FAILED)],
+    });
   }
 }
