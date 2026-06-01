@@ -2,11 +2,14 @@ import { AudioPlayer, createAudioResource, StreamType } from '@discordjs/voice';
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import { logger } from '../../config/logger.js';
-import { ELEVENLABS_CONFIG, shouldLogConversationText } from '../../config/config.js';
+import { ELEVENLABS_CONFIG } from '../../config/config.js';
 import type {
   AgentResponseEvent,
   AudioEvent,
   ClientToolCallEvent,
+  ClientToolResultEvent,
+  ElevenLabsWebSocketEvent,
+  UserAudioChunkEvent,
   UserTranscriptEvent,
 } from './types/websocket.js';
 import { monoPcm48kToStereo } from '../../utils/audioUtils.js';
@@ -116,7 +119,7 @@ export class Agent extends EventEmitter {
   public appendInputAudio(buffer: Buffer): void {
     if (buffer.byteLength === 0 || this.socket?.readyState !== WebSocket.OPEN) return;
 
-    const base64Audio = {
+    const base64Audio: UserAudioChunkEvent = {
       user_audio_chunk: buffer.toString('base64'),
     };
     this.socket.send(JSON.stringify(base64Audio));
@@ -167,7 +170,7 @@ export class Agent extends EventEmitter {
       return { stream: this.pcmStream, isNew: false };
     }
 
-    this.pcmStream = new PassThrough({ highWaterMark: 4096 });
+    this.pcmStream = new PassThrough();
     return { stream: this.pcmStream, isNew: true };
   }
 
@@ -202,9 +205,9 @@ export class Agent extends EventEmitter {
    * @param message - The raw WebSocket message data.
    */
   private async handleEvent(message: WebSocket.RawData): Promise<void> {
-    let event;
+    let event: ElevenLabsWebSocketEvent | { type: string } | undefined;
     try {
-      event = JSON.parse(message.toString());
+      event = JSON.parse(message.toString()) as ElevenLabsWebSocketEvent | { type: string };
       if (!event || typeof event.type !== 'string') {
         logger.warn(`Received invalid WebSocket message: ${message.toString()}`);
         return;
@@ -270,7 +273,7 @@ export class Agent extends EventEmitter {
       return;
     }
 
-    const response = {
+    const response: ClientToolResultEvent = {
       type: 'client_tool_result',
       tool_call_id: toolCallId,
       result: output,
@@ -282,32 +285,16 @@ export class Agent extends EventEmitter {
   }
 
   private handleAgentResponse(event: AgentResponseEvent): void {
-    this.logConversationText(
-      event.agent_response_event?.agent_response,
-      'Agent response received.',
-      text => `Agent Response: ${text}`
-    );
+    const text = event.agent_response_event?.agent_response;
+    if (text?.trim()) {
+      logger.info(`Agent Response: ${text}`);
+    }
   }
 
   private handleUserTranscript(event: UserTranscriptEvent): void {
-    this.logConversationText(
-      event.user_transcription_event?.user_transcript,
-      'User transcript received.',
-      text => `User Transcript: "${text}"`
-    );
-  }
-
-  private logConversationText(
-    text: unknown,
-    privateMessage: string,
-    formatRawMessage: (text: string) => string
-  ): void {
-    if (typeof text !== 'string' || !text.trim()) return;
-
-    if (shouldLogConversationText()) {
-      logger.info(formatRawMessage(text));
-    } else {
-      logger.info(privateMessage);
+    const text = event.user_transcription_event?.user_transcript;
+    if (text?.trim()) {
+      logger.info(`User Transcript: "${text}"`);
     }
   }
 }
