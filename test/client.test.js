@@ -38,3 +38,41 @@ test('handleCommand replies when the requested command is unavailable', async ()
     },
   ]);
 });
+
+test('handleCommand follows up when a deferred command fails', async () => {
+  const replies = [];
+  const commandName = 'throwing-test-command';
+  const interaction = {
+    commandName,
+    deferred: true,
+    replied: false,
+    followUp: async payload => {
+      replies.push({ method: 'followUp', payload });
+    },
+    reply: async payload => {
+      replies.push({ method: 'reply', payload });
+    },
+  };
+
+  commandMap.set(commandName, {
+    execute: async () => {
+      throw new Error('test failure');
+    },
+  });
+
+  try {
+    await handleCommand(interaction);
+  } finally {
+    commandMap.delete(commandName);
+  }
+
+  assert.deepEqual(replies, [
+    {
+      method: 'followUp',
+      payload: {
+        content: 'Command execution failed!',
+        flags: 64,
+      },
+    },
+  ]);
+});
