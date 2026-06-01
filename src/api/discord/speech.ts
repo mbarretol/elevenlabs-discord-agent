@@ -11,36 +11,27 @@ import {
 import { logger } from '../../config/logger.js';
 import { Agent } from '../elevenlabs/agent.js';
 
-interface CodedError extends Error {
-  code?: string;
-}
-
 /**
- * Streams Discord voice packets to the ElevenLabs agent and keeps per-user
- * receive streams healthy while the voice connection is active.
+ * Streams one Discord speaker's voice packets to the ElevenLabs agent while
+ * the voice connection is active.
  */
 class SpeechHandler {
-  private speakingUsers: Map<string, AudioReceiveStream>;
-  private activeSpeakerId: string | null;
-  private isCleaningUp: boolean;
-  private client: Agent;
+  private activeStream: AudioReceiveStream | null = null;
+  private activeSpeakerId: string | null = null;
+  private isCleaningUp = false;
+  private readonly client: Agent;
   private decoder: opus.OpusEncoder;
-  private connection: VoiceConnection;
-  private speakingStartListener?: (userId: string) => void;
-  private agentDisconnectListener?: () => void;
+  private readonly connection: VoiceConnection;
+  private readonly speakingStartListener = this.handleUserSpeaking.bind(this);
+  private readonly agentDisconnectListener = this.handleAgentDisconnect.bind(this);
 
   /**
    * @param client - ElevenLabs agent that receives PCM chunks.
    * @param connection - Active Discord voice connection to monitor.
-   * @param sampleRate - PCM sample rate expected by ElevenLabs (defaults to 16 kHz).
-   * @param channels - Number of channels to decode to (defaults to mono).
    */
-  constructor(client: Agent, connection: VoiceConnection, sampleRate = 16000, channels = 1) {
-    this.speakingUsers = new Map();
-    this.activeSpeakerId = null;
-    this.isCleaningUp = false;
+  constructor(client: Agent, connection: VoiceConnection) {
     this.client = client;
-    this.decoder = new opus.OpusEncoder(sampleRate, channels);
+    this.decoder = new opus.OpusEncoder(16000, 1);
     this.connection = connection;
   }
 
@@ -51,29 +42,25 @@ class SpeechHandler {
   async initialize(): Promise<void> {
     await this.client.connect();
 
-    this.speakingStartListener = (userId: string) => {
-      this.handleUserSpeaking(userId);
-    };
-    this.agentDisconnectListener = () => {
-      logger.warn('ElevenLabs agent disconnected. Destroying voice connection.');
-      this.connection.destroy();
-    };
-
     this.connection.receiver.speaking.on('start', this.speakingStartListener);
     this.connection.on('stateChange', this.handleConnectionStateChange);
     this.client.on('disconnect', this.agentDisconnectListener);
   }
 
   /**
-   * Creates a receive stream the first time a user speaks during the session.
-   * Subsequent speaking events reuse the existing subscription.
+   * Creates one receive stream for the first speaker during the session.
+   * Speaking gaps do not close the stream.
    */
   private handleUserSpeaking(userId: string): void {
-    if (this.isCleaningUp || this.speakingUsers.has(userId)) return;
-    if (this.activeSpeakerId && this.activeSpeakerId !== userId) return;
+    if (this.isCleaningUp || this.activeSpeakerId) return;
 
     this.activeSpeakerId = userId;
     this.createUserAudioStream(userId);
+  }
+
+  private handleAgentDisconnect(): void {
+    logger.warn('ElevenLabs agent disconnected. Destroying voice connection.');
+    this.connection.destroy();
   }
 
   /**
@@ -86,17 +73,17 @@ class SpeechHandler {
         end: { behavior: EndBehaviorType.Manual },
       });
 
-      this.speakingUsers.set(userId, opusAudioStream);
+      this.activeStream = opusAudioStream;
 
       for await (const opusBuffer of opusAudioStream) {
         this.processAudio(opusBuffer);
       }
     } catch (error) {
-      if (!this.isCleaningUp && !this.isPrematureCloseError(error)) {
+      if (!this.isCleaningUp) {
         logger.error(error, `Error receiving user audio: ${userId}`);
       }
     } finally {
-      this.removeUserStream(userId);
+      this.resetActiveStream(userId);
     }
   }
 
@@ -120,63 +107,26 @@ class SpeechHandler {
     if (this.isCleaningUp) return;
     this.isCleaningUp = true;
 
-    if (this.speakingStartListener) {
-      this.connection.receiver.speaking.off('start', this.speakingStartListener);
-      this.speakingStartListener = undefined;
-    }
-
+    this.connection.receiver.speaking.off('start', this.speakingStartListener);
     this.connection.off('stateChange', this.handleConnectionStateChange);
-    if (this.agentDisconnectListener) {
-      this.client.off('disconnect', this.agentDisconnectListener);
-      this.agentDisconnectListener = undefined;
-    }
+    this.client.off('disconnect', this.agentDisconnectListener);
 
-    for (const userId of Array.from(this.speakingUsers.keys())) {
-      this.removeUserStream(userId);
-    }
+    this.resetActiveStream();
     this.client.disconnect();
   }
 
   /**
-   * Removes the stored stream for the user and destroys the underlying
-   * `AudioReceiveStream`.
+   * Clears the active speaker and destroys the underlying receive stream.
    */
-  private removeUserStream(userId: string): void {
-    const stream = this.speakingUsers.get(userId);
-    if (!stream) return;
+  private resetActiveStream(userId?: string): void {
+    if (userId && this.activeSpeakerId !== userId) return;
 
-    this.speakingUsers.delete(userId);
-    const shouldSwitchSpeaker = this.activeSpeakerId === userId;
-    if (shouldSwitchSpeaker) {
-      this.activeSpeakerId = null;
-    }
-
-    if (!stream.destroyed) {
+    const stream = this.activeStream;
+    this.activeStream = null;
+    this.activeSpeakerId = null;
+    if (stream && !stream.destroyed) {
       stream.destroy();
     }
-
-    if (shouldSwitchSpeaker) {
-      this.subscribeNextSpeakingUser();
-    }
-  }
-
-  /**
-   * When the active speaker stops, hand off the single upstream ElevenLabs
-   * session to another member who is currently speaking.
-   */
-  private subscribeNextSpeakingUser(): void {
-    if (this.isCleaningUp || this.activeSpeakerId) return;
-
-    for (const userId of this.connection.receiver.speaking.users.keys()) {
-      if (this.speakingUsers.has(userId)) continue;
-
-      this.handleUserSpeaking(userId);
-      break;
-    }
-  }
-
-  private isPrematureCloseError(error: unknown): boolean {
-    return error instanceof Error && (error as CodedError).code === 'ERR_STREAM_PREMATURE_CLOSE';
   }
 
   /**

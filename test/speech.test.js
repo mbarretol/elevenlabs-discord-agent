@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { EndBehaviorType } from '@discordjs/voice';
+import { EndBehaviorType, VoiceConnectionStatus } from '@discordjs/voice';
 
 process.env.DISCORD_BOT_TOKEN ??= 'test-token';
 process.env.DISCORD_CLIENT_ID ??= 'test-client';
@@ -48,8 +48,12 @@ function createConnection() {
       rejoinAttempts: 0,
     },
     destroyCount: () => destroyCount,
+    emitStateChange: async newState => {
+      await Promise.all([...stateListeners].map(listener => listener({}, newState)));
+    },
     getStream: userId => subscriptions.get(userId),
     getSubscriptionOptions: userId => subscriptionOptions.get(userId),
+    stateListenerCount: () => stateListeners.size,
     subscriptions,
   };
 }
@@ -58,7 +62,10 @@ function createAgent() {
   const agent = new EventEmitter();
   agent.appendedAudio = [];
   agent.connect = async () => {};
-  agent.disconnect = () => {};
+  agent.disconnectCalls = 0;
+  agent.disconnect = () => {
+    agent.disconnectCalls += 1;
+  };
   agent.appendInputAudio = buffer => {
     agent.appendedAudio.push(buffer.toString());
   };
@@ -124,4 +131,43 @@ test('SpeechHandler keeps the active receive stream alive for the session', asyn
   assert.deepEqual(agent.appendedAudio, ['speaker-one', 'speaker-two']);
 
   firstStream.destroy();
+});
+
+test('SpeechHandler cleans up streams and listeners when the voice connection is destroyed', async () => {
+  const agent = createAgent();
+  const {
+    connection,
+    destroyCount,
+    emitStateChange,
+    getStream,
+    stateListenerCount,
+    subscriptions,
+  } = createConnection();
+  const handler = new SpeechHandler(agent, connection);
+
+  handler.decoder = { decode: buffer => buffer };
+
+  await handler.initialize();
+
+  connection.receiver.speaking.emit('start', 'user-1');
+  await new Promise(resolve => setImmediate(resolve));
+
+  const stream = getStream('user-1');
+  assert.ok(stream);
+
+  await emitStateChange({ status: VoiceConnectionStatus.Destroyed });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(stream.destroyed, true);
+  assert.equal(agent.disconnectCalls, 1);
+  assert.equal(connection.receiver.speaking.listenerCount('start'), 0);
+  assert.equal(stateListenerCount(), 0);
+  assert.equal(agent.listenerCount('disconnect'), 0);
+
+  connection.receiver.speaking.emit('start', 'user-2');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(subscriptions.has('user-2'), false);
+
+  agent.emit('disconnect');
+  assert.equal(destroyCount(), 0);
 });
