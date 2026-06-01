@@ -9,8 +9,6 @@ export const data = new SlashCommandBuilder()
   .setName('talk')
   .setDescription('Start a voice conversation.');
 
-const START_FAILED = "Couldn't start the live conversation. Please try again in a moment.";
-
 async function replyWithError(
   interaction: ChatInputCommandInteraction,
   message: string
@@ -32,7 +30,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return replyWithError(interaction, 'You need to be in a voice channel to use this command.');
   }
 
-  if (getVoiceConnection(voiceChannel.guild.id)) {
+  const voiceConnection = getVoiceConnection(interaction.guildId);
+
+  if (voiceConnection) {
     return replyWithError(interaction, 'Client is already in a voice channel.');
   }
 
@@ -68,7 +68,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     logger.error(error, 'Failed to start ElevenLabs voice session');
 
     await interaction.editReply({
-      embeds: [Embeds.error('Voice Session Failed', START_FAILED)],
+      embeds: [
+        Embeds.error(
+          'Voice Session Failed',
+          "Couldn't start the live conversation. Please try again in a moment."
+        ),
+      ],
     });
   }
 }
