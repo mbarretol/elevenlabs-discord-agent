@@ -8,6 +8,7 @@ process.env.DISCORD_CLIENT_ID ??= 'test-client';
 process.env.AGENT_ID ??= 'test-agent';
 
 const { Agent } = await import('../dist/api/elevenlabs/agent.js');
+const { createClientTools } = await import('../dist/tools/clientTools.js');
 
 function createAudioPlayer() {
   return {
@@ -54,7 +55,10 @@ test('Agent logs raw conversation text', () => {
   const messages = [];
 
   logger.info = (...args) => {
-    messages.push(args.join(' '));
+    const message = args.join(' ');
+    if (message.includes('Agent Response') || message.includes('User Transcript')) {
+      messages.push(message);
+    }
   };
 
   try {
@@ -128,6 +132,197 @@ test('Agent sends an error result for unsupported client tool calls', async () =
       is_error: true,
     },
   ]);
+});
+
+test('Agent executes client tool calls through the configured dispatcher', async () => {
+  const sent = [];
+  const toolCalls = [];
+  const agent = new Agent(createAudioPlayer(), {
+    clientTools: {
+      async execute(toolName, parameters) {
+        toolCalls.push({ toolName, parameters });
+        return { result: 'tool result', isError: false };
+      },
+    },
+  });
+
+  agent.socket = {
+    readyState: 1,
+    send(message) {
+      sent.push(JSON.parse(message));
+    },
+  };
+
+  await agent.handleEvent(
+    Buffer.from(
+      JSON.stringify({
+        type: 'client_tool_call',
+        client_tool_call: {
+          tool_name: 'custom_tool',
+          tool_call_id: 'call-2',
+          parameters: { value: 'x' },
+        },
+      })
+    )
+  );
+
+  assert.deepEqual(toolCalls, [{ toolName: 'custom_tool', parameters: { value: 'x' } }]);
+  assert.deepEqual(sent, [
+    {
+      type: 'client_tool_result',
+      tool_call_id: 'call-2',
+      result: 'tool result',
+      is_error: false,
+    },
+  ]);
+});
+
+test('Discord message search client tool builds the Discord search request', async () => {
+  const sent = [];
+  const restCalls = [];
+  const agent = new Agent(createAudioPlayer(), {
+    clientTools: createClientTools({
+      discordMessageSearch: {
+        guildId: 'guild-1',
+        channelId: 'channel-1',
+        rest: {
+          async get(route, options) {
+            restCalls.push({ route, query: options.query });
+            return {
+              doing_deep_historical_index: false,
+              total_results: 1,
+              messages: [
+                [
+                  {
+                    id: 'message-1',
+                    channel_id: 'channel-1',
+                    author: {
+                      id: 'user-1',
+                      username: 'Marco',
+                      global_name: null,
+                    },
+                    timestamp: '2026-06-03T10:15:00.000Z',
+                    content: 'deploy went through',
+                  },
+                ],
+              ],
+            };
+          },
+        },
+      },
+    }),
+  });
+
+  agent.socket = {
+    readyState: 1,
+    send(message) {
+      sent.push(JSON.parse(message));
+    },
+  };
+
+  await agent.handleEvent(
+    Buffer.from(
+      JSON.stringify({
+        type: 'client_tool_call',
+        client_tool_call: {
+          tool_name: 'search_discord_messages',
+          tool_call_id: 'call-3',
+          parameters: { query: 'deploy', limit: 2 },
+        },
+      })
+    )
+  );
+
+  assert.equal(restCalls.length, 1);
+  assert.equal(restCalls[0].route, '/guilds/guild-1/messages/search');
+  assert.equal(restCalls[0].query.get('content'), 'deploy');
+  assert.equal(restCalls[0].query.get('limit'), '2');
+  assert.equal(restCalls[0].query.get('channel_id'), 'channel-1');
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'client_tool_result');
+  assert.equal(sent[0].tool_call_id, 'call-3');
+  assert.equal(sent[0].is_error, false);
+
+  const result = JSON.parse(sent[0].result);
+  assert.equal(result.totalResults, 1);
+  assert.equal(result.returned, 1);
+  assert.equal(result.results[0].content, 'deploy went through');
+  assert.equal(result.results[0].url, 'https://discord.com/channels/guild-1/channel-1/message-1');
+});
+
+test('Discord message search supports channel names and first-message mode without a query', async () => {
+  const sent = [];
+  const restCalls = [];
+  const agent = new Agent(createAudioPlayer(), {
+    clientTools: createClientTools({
+      discordMessageSearch: {
+        guildId: 'guild-1',
+        channelId: 'current-channel',
+        resolveChannelId(channelName) {
+          return channelName.toLowerCase() === 'test' ? 'test-channel' : undefined;
+        },
+        rest: {
+          async get(route, options) {
+            restCalls.push({ route, query: options.query });
+            return {
+              doing_deep_historical_index: false,
+              total_results: 1,
+              messages: [
+                [
+                  {
+                    id: 'first-message',
+                    channel_id: 'test-channel',
+                    author: {
+                      id: 'user-1',
+                      username: 'Marco',
+                      global_name: null,
+                    },
+                    timestamp: '2026-06-03T09:00:00.000Z',
+                    content: 'Das ist ein test',
+                  },
+                ],
+              ],
+            };
+          },
+        },
+      },
+    }),
+  });
+
+  agent.socket = {
+    readyState: 1,
+    send(message) {
+      sent.push(JSON.parse(message));
+    },
+  };
+
+  await agent.handleEvent(
+    Buffer.from(
+      JSON.stringify({
+        type: 'client_tool_call',
+        client_tool_call: {
+          tool_name: 'search_discord_messages',
+          tool_call_id: 'call-4',
+          parameters: { channelName: 'Test', mode: 'first', limit: 1 },
+        },
+      })
+    )
+  );
+
+  assert.equal(restCalls.length, 1);
+  assert.equal(restCalls[0].route, '/guilds/guild-1/messages/search');
+  assert.equal(restCalls[0].query.has('content'), false);
+  assert.equal(restCalls[0].query.get('channel_id'), 'test-channel');
+  assert.equal(restCalls[0].query.get('sort_by'), 'timestamp');
+  assert.equal(restCalls[0].query.get('sort_order'), 'asc');
+  assert.equal(restCalls[0].query.get('limit'), '1');
+
+  const result = JSON.parse(sent[0].result);
+  assert.equal(sent[0].tool_call_id, 'call-4');
+  assert.equal(sent[0].is_error, false);
+  assert.equal(result.mode, 'first');
+  assert.equal(result.results[0].content, 'Das ist ein test');
 });
 
 test('Agent streams output audio as stereo PCM and reuses the active stream', () => {
