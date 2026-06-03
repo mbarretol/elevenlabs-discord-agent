@@ -1,9 +1,24 @@
 import { AudioPlayer, joinVoiceChannel, getVoiceConnection } from '@discordjs/voice';
-import { ChatInputCommandInteraction, MessageFlags, SlashCommandBuilder } from 'discord.js';
+import {
+  ChannelType,
+  ChatInputCommandInteraction,
+  MessageFlags,
+  SlashCommandBuilder,
+} from 'discord.js';
 import { SpeechHandler } from '../api/discord/speech.js';
 import { Agent } from '../api/elevenlabs/agent.js';
 import { logger } from '../config/logger.js';
+import { createClientTools } from '../tools/clientTools.js';
 import { Embeds } from '../utils/embedHelper.js';
+
+const SEARCHABLE_CHANNEL_TYPES = new Set([
+  ChannelType.GuildText,
+  ChannelType.GuildAnnouncement,
+  ChannelType.GuildForum,
+  ChannelType.PublicThread,
+  ChannelType.PrivateThread,
+  ChannelType.AnnouncementThread,
+]);
 
 export const data = new SlashCommandBuilder()
   .setName('talk')
@@ -42,7 +57,26 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   try {
     const audioPlayer = new AudioPlayer();
-    const agent = new Agent(audioPlayer);
+    const agent = new Agent(audioPlayer, {
+      clientTools: createClientTools({
+        discordMessageSearch: {
+          rest: interaction.client.rest,
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          resolveChannelId: channelName => {
+            const normalizedName = normalizeChannelName(channelName);
+            const channel = interaction.guild.channels.cache.find(
+              channel =>
+                SEARCHABLE_CHANNEL_TYPES.has(channel.type) &&
+                'name' in channel &&
+                normalizeChannelName(channel.name) === normalizedName
+            );
+
+            return channel?.id;
+          },
+        },
+      }),
+    });
     const connection = joinVoiceChannel({
       adapterCreator: voiceChannel.guild.voiceAdapterCreator,
       channelId: voiceChannel.id,
@@ -76,4 +110,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       ],
     });
   }
+}
+
+function normalizeChannelName(channelName: string): string {
+  return channelName.trim().replace(/^#/, '').toLowerCase();
 }
