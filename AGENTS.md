@@ -22,8 +22,8 @@
 
 ## Conventions
 
-- This is a TypeScript ESM project; keep imports using `.js` extensions for local modules.
-- Keep code simple, concise, and clean; avoid overengineering.
+- This is a TypeScript ESM project, keep imports using `.js` extensions for local modules.
+- Keep code simple, concise, and clean, avoid overengineering.
 - Do not add overly defensive safety checks unless they protect a real failure mode.
 - Use `Embeds` from `src/utils/embedHelper.ts` for Discord embed responses.
 - Keep command handlers small and follow the existing pattern in `src/commands/talk.ts` and `src/commands/leave.ts`.
