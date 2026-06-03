@@ -11,6 +11,14 @@ import {
 import { logger } from '../../config/logger.js';
 import { Agent } from '../elevenlabs/agent.js';
 
+const SPEECH_INACTIVITY_TIMEOUT_MS = 300;
+const ELEVENLABS_INPUT_SAMPLE_RATE = 16000;
+const PCM_16_BIT_BYTES = 2;
+const SPEECH_END_SILENCE_MS = 300;
+const SPEECH_END_SILENCE = Buffer.alloc(
+  (ELEVENLABS_INPUT_SAMPLE_RATE * PCM_16_BIT_BYTES * SPEECH_END_SILENCE_MS) / 1000
+);
+
 /**
  * Streams one Discord speaker's voice packets to the ElevenLabs agent while
  * the voice connection is active.
@@ -23,6 +31,7 @@ class SpeechHandler {
   private decoder: opus.OpusEncoder;
   private readonly connection: VoiceConnection;
   private readonly speakingStartListener = this.handleUserSpeaking.bind(this);
+  private readonly speakingEndListener = this.handleUserStoppedSpeaking.bind(this);
   private readonly agentDisconnectListener = this.handleAgentDisconnect.bind(this);
 
   /**
@@ -43,19 +52,28 @@ class SpeechHandler {
     await this.client.connect();
 
     this.connection.receiver.speaking.on('start', this.speakingStartListener);
+    this.connection.receiver.speaking.on('end', this.speakingEndListener);
     this.connection.on('stateChange', this.handleConnectionStateChange);
     this.client.on('disconnect', this.agentDisconnectListener);
   }
 
   /**
-   * Creates one receive stream for the first speaker during the session.
-   * Speaking gaps do not close the stream.
+   * Creates an utterance receive stream for the active speaker.
    */
   private handleUserSpeaking(userId: string): void {
-    if (this.isCleaningUp || this.activeSpeakerId) return;
+    if (this.isCleaningUp) return;
+    if (this.activeSpeakerId && this.activeSpeakerId !== userId) return;
+
+    if (this.activeSpeakerId) return;
 
     this.activeSpeakerId = userId;
     this.createUserAudioStream(userId);
+  }
+
+  private handleUserStoppedSpeaking(userId: string): void {
+    if (this.isCleaningUp || this.activeSpeakerId !== userId) return;
+
+    this.client.appendInputAudio(SPEECH_END_SILENCE);
   }
 
   private handleAgentDisconnect(): void {
@@ -65,12 +83,15 @@ class SpeechHandler {
 
   /**
    * Subscribes to a user's Opus stream and forwards decoded audio to ElevenLabs
-   * until the voice session is cleaned up or the stream errors.
+   * until Discord sees a short period without voice packets.
    */
   private async createUserAudioStream(userId: string): Promise<void> {
     try {
       const opusAudioStream: AudioReceiveStream = this.connection.receiver.subscribe(userId, {
-        end: { behavior: EndBehaviorType.Manual },
+        end: {
+          behavior: EndBehaviorType.AfterInactivity,
+          duration: SPEECH_INACTIVITY_TIMEOUT_MS,
+        },
       });
 
       this.activeStream = opusAudioStream;
@@ -108,6 +129,7 @@ class SpeechHandler {
     this.isCleaningUp = true;
 
     this.connection.receiver.speaking.off('start', this.speakingStartListener);
+    this.connection.receiver.speaking.off('end', this.speakingEndListener);
     this.connection.off('stateChange', this.handleConnectionStateChange);
     this.client.off('disconnect', this.agentDisconnectListener);
 
