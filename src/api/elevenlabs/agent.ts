@@ -3,6 +3,7 @@ import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import { logger } from '../../config/logger.js';
 import { ELEVENLABS_CONFIG } from '../../config/config.js';
+import { createClientTools, type ClientTools } from '../../tools/clientTools.js';
 import type {
   AgentResponseEvent,
   AudioEvent,
@@ -14,6 +15,10 @@ import type {
 } from './types/websocket.js';
 import { monoPcm48kToStereo } from '../../utils/audioUtils.js';
 import { PassThrough } from 'stream';
+
+export interface AgentOptions {
+  clientTools?: ClientTools;
+}
 
 /**
  * Orchestrates the ElevenLabs Agent, maintains the WebSocket session,
@@ -32,10 +37,12 @@ export class Agent extends EventEmitter {
   private readonly socketMessageListener = (message: WebSocket.RawData) => {
     void this.handleEvent(message);
   };
+  private readonly clientTools: ClientTools;
 
-  constructor(audioPlayer: AudioPlayer) {
+  constructor(audioPlayer: AudioPlayer, options: AgentOptions = {}) {
     super();
     this.audioPlayer = audioPlayer;
+    this.clientTools = options.clientTools ?? createClientTools();
   }
 
   /**
@@ -227,7 +234,7 @@ export class Agent extends EventEmitter {
           this.handleInterruption();
           break;
         case 'client_tool_call':
-          this.handleClientToolCall(event as ClientToolCallEvent);
+          await this.handleClientToolCall(event as ClientToolCallEvent);
           break;
         default:
           logger.debug(`Received unhandled WebSocket event type: ${event.type}`);
@@ -240,7 +247,7 @@ export class Agent extends EventEmitter {
     }
   }
 
-  private handleClientToolCall(event: ClientToolCallEvent): void {
+  private async handleClientToolCall(event: ClientToolCallEvent): Promise<void> {
     const toolCall = event.client_tool_call;
     if (!toolCall) {
       logger.warn("Received client_tool_call event with no 'client_tool_call' details.");
@@ -255,9 +262,8 @@ export class Agent extends EventEmitter {
     }
 
     logger.info(`Handling client tool call: ${tool} (ID: ${tool_call_id})`);
-    const message = `Error: Unsupported tool '${tool}'.`;
-    logger.warn(message);
-    this.sendToolResponse(tool_call_id, message, true);
+    const result = await this.clientTools.execute(tool, toolCall.parameters ?? {});
+    this.sendToolResponse(tool_call_id, result.result, result.isError);
   }
 
   /**
