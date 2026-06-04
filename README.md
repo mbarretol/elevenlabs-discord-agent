@@ -4,9 +4,10 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 
 ## Features
 
-- **Slash Command Support**: Simple `/talk` command interface to initiate voice interactions in any channel.
+- **Slash Command Support**: `/talk` starts a voice session and `/leave` disconnects the bot.
 - **Real-time Conversations**: WebSocket input and output streaming for low latency voice conversations.
 - **Interruption Handling**: The bot is able to handle interruptions gracefully.
+- **Discord Message Search Tool**: The bundled ElevenLabs agent can search previous Discord messages by text, channel, or first/latest message.
 
 ## Getting Started
 
@@ -45,7 +46,7 @@ A Discord bot that enables natural, real-time voice interactions in your server 
    npm run setup
    ```
 
-   The setup script creates `.env`, creates a Discord-ready ElevenLabs agent, saves the returned `AGENT_ID`, and prints a Discord invite URL.
+   The setup script creates `.env`, creates a Discord-ready ElevenLabs agent from `src/config/elevenlabs/discord-agent.json`, saves the returned `AGENT_ID`, and prints a Discord invite URL. The bundled agent config includes the required audio settings and client tool schema for Discord message search.
 
 8. Open the generated invite URL in your browser and invite the bot to your server.
 
@@ -56,11 +57,8 @@ A Discord bot that enables natural, real-time voice interactions in your server 
    ```
 
 10. Once started, the slash commands will be deployed. This process might take a few minutes. Once everything is setup, your bot should appear online and you can use `/talk` for the bot to join the voice channel.
+
     **Note:** You must be in a voice channel for the bot to join.
-
-### Manual Agent Setup
-
-If you already have an ElevenLabs agent, run `npm run setup` and enter the existing `AGENT_ID` when prompted. The bot expects an agent that accepts 16kHz PCM input and returns 48kHz PCM output.
 
 ## License
 
