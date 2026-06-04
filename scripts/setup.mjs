@@ -12,28 +12,11 @@ const agentConfigPath = resolve(rootDir, 'src', 'config', 'elevenlabs', 'discord
 const createAgentUrl = 'https://api.elevenlabs.io/v1/convai/agents/create';
 const discordVoicePermissions = 36_700_160;
 
-function readArg(flag) {
-  const index = process.argv.indexOf(flag);
-  return index === -1 ? undefined : process.argv[index + 1];
-}
-
-function hasFlag(flag) {
-  return process.argv.includes(flag);
-}
-
 function printHelp() {
   console.log(`Usage: npm run setup
 
-Creates or updates .env, optionally creates an ElevenLabs agent, and prints a
-Discord invite URL.
-
-Options:
-  --help                    Show this help message
-  --yes                     Use existing values and defaults where possible
-  --discord-token <token>   Discord bot token
-  --discord-client-id <id>  Discord application client ID
-  --elevenlabs-key <key>    ElevenLabs API key
-  --agent-id <id>           Existing ElevenLabs agent ID`);
+Creates or updates .env, creates an ElevenLabs agent from the bundled config,
+and prints a Discord invite URL.`);
 }
 
 function parseEnv(contents) {
@@ -76,6 +59,10 @@ function upsertEnv(contents, updates) {
   return `${lines.filter((line, index, all) => line || index < all.length - 1).join('\n')}\n`;
 }
 
+function formatErrorDetail(detail) {
+  return typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2);
+}
+
 async function ensureEnvFile() {
   if (existsSync(envPath)) return;
 
@@ -89,24 +76,7 @@ async function ensureEnvFile() {
   console.log('Created .env.');
 }
 
-async function backupEnvFile() {
-  if (!existsSync(envPath)) return;
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = resolve(rootDir, `.env.${timestamp}.backup`);
-  await copyFile(envPath, backupPath);
-  console.log(`Backed up existing .env to ${backupPath}`);
-}
-
-async function promptFor(
-  rl,
-  label,
-  existingValue,
-  fallbackValue,
-  { required = true, sensitive = false } = {}
-) {
-  if (fallbackValue) return fallbackValue.trim();
-
+async function promptFor(rl, label, existingValue, { required = true, sensitive = false } = {}) {
   const suffix = existingValue ? ` [current: ${sensitive ? 'set' : existingValue}]` : '';
   const answer = await rl.question(`${label}${suffix}: `);
   const value = answer.trim() || existingValue;
@@ -116,13 +86,6 @@ async function promptFor(
   }
 
   return value;
-}
-
-async function confirm(rl, message, defaultYes) {
-  const hint = defaultYes ? 'Y/n' : 'y/N';
-  const answer = (await rl.question(`${message} (${hint}): `)).trim().toLowerCase();
-  if (!answer) return defaultYes;
-  return answer === 'y' || answer === 'yes';
 }
 
 async function createAgent(apiKey) {
@@ -148,7 +111,9 @@ async function createAgent(apiKey) {
 
   if (!response.ok) {
     const detail = responseBody.detail ?? responseBody.message ?? responseText;
-    throw new Error(`ElevenLabs agent creation failed (${response.status}): ${detail}`);
+    throw new Error(
+      `ElevenLabs agent creation failed (${response.status}): ${formatErrorDetail(detail)}`
+    );
   }
 
   if (!responseBody.agent_id) {
@@ -170,7 +135,7 @@ function createInviteUrl(clientId) {
 }
 
 async function main() {
-  if (hasFlag('--help')) {
+  if (process.argv.includes('--help')) {
     printHelp();
     return;
   }
@@ -179,7 +144,6 @@ async function main() {
 
   const envContents = await readFile(envPath, 'utf8');
   const env = parseEnv(envContents);
-  const yes = hasFlag('--yes');
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -187,47 +151,14 @@ async function main() {
   });
 
   try {
-    const discordToken = await promptFor(
-      rl,
-      'Discord bot token',
-      env.DISCORD_BOT_TOKEN,
-      readArg('--discord-token'),
-      { sensitive: true }
-    );
-    const discordClientId = await promptFor(
-      rl,
-      'Discord client ID',
-      env.DISCORD_CLIENT_ID,
-      readArg('--discord-client-id')
-    );
-
-    let agentId =
-      readArg('--agent-id') ??
-      env.AGENT_ID ??
-      (yes ? '' : await rl.question('Existing ElevenLabs agent ID (leave blank to create one): '));
-    agentId = agentId.trim();
-
-    let elevenLabsApiKey = readArg('--elevenlabs-key') ?? env.ELEVENLABS_API_KEY ?? '';
-
-    if (!agentId) {
-      elevenLabsApiKey = await promptFor(rl, 'ElevenLabs API key', elevenLabsApiKey, undefined, {
-        sensitive: true,
-      });
-      agentId = await createAgent(elevenLabsApiKey);
-    } else if (!yes) {
-      const shouldCreateAgent = await confirm(
-        rl,
-        'Create a new ElevenLabs agent from the bundled Discord config instead',
-        false
-      );
-
-      if (shouldCreateAgent) {
-        elevenLabsApiKey = await promptFor(rl, 'ElevenLabs API key', elevenLabsApiKey, undefined, {
-          sensitive: true,
-        });
-        agentId = await createAgent(elevenLabsApiKey);
-      }
-    }
+    const discordToken = await promptFor(rl, 'Discord bot token', env.DISCORD_BOT_TOKEN, {
+      sensitive: true,
+    });
+    const discordClientId = await promptFor(rl, 'Discord client ID', env.DISCORD_CLIENT_ID);
+    const elevenLabsApiKey = await promptFor(rl, 'ElevenLabs API key', env.ELEVENLABS_API_KEY, {
+      sensitive: true,
+    });
+    const agentId = await createAgent(elevenLabsApiKey);
 
     const updates = {
       DISCORD_BOT_TOKEN: discordToken,
@@ -239,7 +170,6 @@ async function main() {
       updates.ELEVENLABS_API_KEY = elevenLabsApiKey;
     }
 
-    await backupEnvFile();
     await writeFile(envPath, upsertEnv(envContents, updates), 'utf8');
 
     console.log('\nSetup complete.');
