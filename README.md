@@ -50,13 +50,19 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 
 8. Open the generated invite URL in your browser and invite the bot to your server.
 
-9. Run the bot.
+9. Deploy the slash commands. Run this again whenever you add or change a command.
 
    ```bash
-   npm start
+   npm run deploy
    ```
 
-10. Once started, the slash commands will be deployed. This process might take a few minutes. Once everything is setup, your bot should appear online and you can use `/talk` for the bot to join the voice channel.
+10. Run the bot.
+
+```bash
+npm start
+```
+
+11. Once started, your bot should appear online and you can use `/talk` for the bot to join the voice channel. Global slash command changes can take a few minutes to appear in Discord.
 
     **Note:** You must be in a voice channel for the bot to join.
 
