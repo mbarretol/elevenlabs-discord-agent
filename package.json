@@ -6,6 +6,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc --project tsconfig.json",
+    "deploy": "npm run build && node dist/utils/deployCommands.js",
     "setup": "node scripts/setup.mjs",
     "start": "npm run build && node dist/api/discord/client.js",
     "test": "npm run build && node --test",
