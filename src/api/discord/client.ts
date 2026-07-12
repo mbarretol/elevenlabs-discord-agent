@@ -9,7 +9,6 @@ import {
 import { commandMap } from '../../commands/index.js';
 import { DISCORD_CONFIG } from '../../config/config.js';
 import { logger } from '../../config/logger.js';
-import { deployCommands } from '../../utils/deployCommands.js';
 
 async function replyOrFollowUp(
   interaction: ChatInputCommandInteraction,
@@ -57,8 +56,7 @@ async function main(): Promise<void> {
     }
   });
 
-  client.once(Events.ClientReady, async () => {
-    await deployCommands();
+  client.once(Events.ClientReady, () => {
     logger.info(`Ready! Logged in as ${client.user?.username}`);
   });
 
