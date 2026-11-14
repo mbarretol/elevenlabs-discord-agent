@@ -5,6 +5,7 @@ import { Agent } from '../api/elevenlabs/agent.js';
 import { getAgentUrl } from '../config/config.js';
 import { logger } from '../config/logger.js';
 import { createSearchDiscordMessagesTool } from '../tools/searchDiscordMessages.js';
+import { createSoundboardTool } from '../tools/soundboard.js';
 import { Embeds } from '../utils/embedHelper.js';
 
 export const data = new SlashCommandBuilder()
@@ -58,6 +59,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
           interaction.member,
           interaction.channelId
         ),
+        play_soundboard_sound: createSoundboardTool(interaction.member, voiceChannel),
       },
     });
     await new SpeechHandler(agent, connection).initialize();

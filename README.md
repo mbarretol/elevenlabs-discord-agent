@@ -8,6 +8,7 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 - **Real-time Conversations**: WebSocket input and output streaming for low latency voice conversations.
 - **Interruption Handling**: The bot is able to handle interruptions gracefully.
 - **Discord Message Search Tool**: The bundled ElevenLabs agent can search previous Discord messages by text, channel, or first/latest message. Searches are limited to channels that the member who ran `/talk` can read.
+- **Soundboard Tool**: The agent can play the server's soundboard sounds, or Discord's default ones, in the voice channel. It needs the member who ran `/talk` to have the Use Soundboard permission, and does not work in stage channels.
 
 ## Getting Started
 
@@ -47,7 +48,7 @@ A Discord bot that enables natural, real-time voice interactions in your server 
    npm run setup
    ```
 
-   The setup script creates `.env`, creates a Discord-ready ElevenLabs agent from `src/config/elevenlabs/discord-agent.json`, saves the returned `AGENT_ID`, and prints a Discord invite URL. The bundled agent config includes the required audio settings and client tool schema for Discord message search.
+   The setup script creates `.env`, creates a Discord-ready ElevenLabs agent from `src/config/elevenlabs/discord-agent.json`, saves the returned `AGENT_ID`, and prints a Discord invite URL. The bundled agent config includes the required audio settings and client tool schemas for Discord message search and the soundboard.
 
    Running it again keeps the existing agent. Remove `AGENT_ID` from `.env` first to create a new one.
 
