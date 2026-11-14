@@ -1,6 +1,7 @@
 {
   "name": "Discord Voice Agent",
   "conversation_config": {
+    "realtime_model": "eleven_realtime_v1_mini",
     "asr": {
       "quality": "high",
       "provider": "scribe_realtime",

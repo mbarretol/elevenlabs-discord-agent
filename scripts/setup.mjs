@@ -51,18 +51,34 @@ async function promptFor(rl, label, existingValue, { sensitive = false } = {}) {
   return value;
 }
 
-async function createAgent(apiKey) {
-  console.log('Creating ElevenLabs agent...');
-  const response = await fetch(createAgentUrl, {
+function postAgent(apiKey, config) {
+  return fetch(createAgentUrl, {
     method: 'POST',
     headers: {
       'xi-api-key': apiKey,
       'Content-Type': 'application/json',
     },
-    body: await readFile(agentConfigPath, 'utf8'),
+    body: JSON.stringify(config),
   });
+}
 
-  const body = await response.text();
+async function createAgent(apiKey) {
+  console.log('Creating ElevenLabs agent...');
+  const config = JSON.parse(await readFile(agentConfigPath, 'utf8'));
+  let response = await postAgent(apiKey, config);
+  let body = await response.text();
+
+  // Realtime models are rolling out gradually. Without access, the agent runs
+  // its configured speech-to-text, LLM and text-to-speech models instead.
+  if (!response.ok && body.includes('Realtime models are not available')) {
+    console.log(
+      'Realtime models are not available for this workspace yet. Using the standard models.'
+    );
+    config.conversation_config.realtime_model = null;
+    response = await postAgent(apiKey, config);
+    body = await response.text();
+  }
+
   if (!response.ok) {
     throw new Error(`ElevenLabs agent creation failed (${response.status}): ${body}`);
   }
