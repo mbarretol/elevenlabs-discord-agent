@@ -2,22 +2,11 @@ export interface AudioEvent {
   type: 'audio';
   audio_event: {
     audio_base_64: string;
-    event_id: number | string;
-    alignment?: {
-      chars: string[];
-      char_durations_ms: number[];
-      char_start_times_ms: number[];
-    };
   };
 }
 
-export interface ConversationInitiationMetadataEvent {
-  type: 'conversation_initiation_metadata';
-  conversation_initiation_metadata_event: {
-    conversation_id: string;
-    agent_output_audio_format?: string;
-    user_input_audio_format?: string;
-  };
+export interface InterruptionEvent {
+  type: 'interruption';
 }
 
 export interface UserTranscriptEvent {
@@ -36,19 +25,20 @@ export interface AgentResponseEvent {
 
 export interface ClientToolCallEvent {
   type: 'client_tool_call';
-  client_tool_call?: {
-    tool_name?: string;
-    tool_call_id?: string;
+  client_tool_call: {
+    tool_name: string;
+    tool_call_id: string;
     parameters?: Record<string, unknown>;
   };
 }
 
-export interface InterruptionEvent {
-  type: 'interruption';
-  interruption_event?: {
-    event_id?: number | string;
-  };
-}
+/** The server events the bot acts on. Other event types are ignored. */
+export type ServerEvent =
+  | AudioEvent
+  | InterruptionEvent
+  | UserTranscriptEvent
+  | AgentResponseEvent
+  | ClientToolCallEvent;
 
 export interface UserAudioChunkEvent {
   user_audio_chunk: string;
@@ -61,10 +51,4 @@ export interface ClientToolResultEvent {
   is_error: boolean;
 }
 
-export type ElevenLabsWebSocketEvent =
-  | ConversationInitiationMetadataEvent
-  | UserTranscriptEvent
-  | AgentResponseEvent
-  | AudioEvent
-  | InterruptionEvent
-  | ClientToolCallEvent;
+export type ClientEvent = UserAudioChunkEvent | ClientToolResultEvent;

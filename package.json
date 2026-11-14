@@ -1,15 +1,19 @@
 {
   "name": "elevenlabs-discord-voicebot",
   "description": "Simple demo of ElevenLabs Conversational AI WebSocket that enables Discord users to talk to LLMs via voice.",
+  "license": "MIT",
   "main": "dist/api/discord/client.js",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc --project tsconfig.json",
-    "deploy": "npm run build && node dist/utils/deployCommands.js",
+    "deploy": "npm run build && node dist/deployCommands.js",
     "setup": "node scripts/setup.mjs",
     "start": "npm run build && node dist/api/discord/client.js",
-    "test": "npm run build && node --test",
+    "test": "npm run build && node --test --test-force-exit",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "lint": "eslint . --cache",
