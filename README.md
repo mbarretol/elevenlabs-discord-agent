@@ -8,7 +8,7 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 - **Real-time Conversations**: WebSocket input and output streaming for low latency voice conversations.
 - **Interruption Handling**: The bot is able to handle interruptions gracefully.
 - **Discord Message Search Tool**: The bundled ElevenLabs agent can search previous Discord messages by text, channel, or first/latest message. Searches are limited to channels that the member who ran `/talk` can read.
-- **Soundboard Tool**: The agent can play the server's soundboard sounds, or Discord's default ones, in the voice channel. It needs the member who ran `/talk` to have the Use Soundboard permission, and does not work in stage channels.
+- **Soundboard Tools**: The agent can list and play the server's soundboard sounds, or Discord's default ones, in the voice channel. Playing needs the member who ran `/talk` to have the Use Soundboard permission, and does not work in stage channels.
 
 ## Getting Started
 
