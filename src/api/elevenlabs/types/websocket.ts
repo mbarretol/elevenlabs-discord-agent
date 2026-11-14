@@ -23,6 +23,15 @@ export interface AgentResponseEvent {
   };
 }
 
+export interface PingEvent {
+  type: 'ping';
+  ping_event: {
+    event_id: number;
+    /** Estimated round trip to ElevenLabs, from earlier pings. */
+    ping_ms?: number | null;
+  };
+}
+
 export interface ClientToolCallEvent {
   type: 'client_tool_call';
   client_tool_call: {
@@ -38,6 +47,7 @@ export type ServerEvent =
   | InterruptionEvent
   | UserTranscriptEvent
   | AgentResponseEvent
+  | PingEvent
   | ClientToolCallEvent;
 
 export interface UserAudioChunkEvent {
@@ -51,4 +61,9 @@ export interface ClientToolResultEvent {
   is_error: boolean;
 }
 
-export type ClientEvent = UserAudioChunkEvent | ClientToolResultEvent;
+export interface PongEvent {
+  type: 'pong';
+  event_id: number;
+}
+
+export type ClientEvent = UserAudioChunkEvent | ClientToolResultEvent | PongEvent;

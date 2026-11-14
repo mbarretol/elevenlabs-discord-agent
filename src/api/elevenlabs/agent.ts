@@ -29,6 +29,9 @@ export class Agent {
   private readonly tools: Record<string, ClientTool>;
   private socket: WebSocket | null = null;
   private playback: { pcm: PassThrough; resource: AudioResource } | null = null;
+  /** Latency measurements for the user's latest turn, until the agent starts answering it. */
+  private turn: { speechEndedAt: number; transcriptAt?: number } | null = null;
+  private pingMs: number | null = null;
 
   constructor({ url, audioPlayer, tools = {} }: AgentOptions) {
     this.url = url;
@@ -84,6 +87,15 @@ export class Agent {
     this.send({ user_audio_chunk: buffer.toString('base64') });
   }
 
+  /**
+   * Marks the end of the user's speech. The time until the agent's first audio
+   * is logged as the response latency.
+   * @param time - When the last voice packet arrived, from `Date.now()`.
+   */
+  public markUserSpeechEnd(time: number): void {
+    this.turn = { speechEndedAt: time };
+  }
+
   private send(event: ClientEvent): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(event));
@@ -96,6 +108,7 @@ export class Agent {
 
       switch (event.type) {
         case 'audio':
+          this.logResponseLatency();
           this.getPcmStream().write(monoPcm48kToStereo(event.audio_event.audio_base_64));
           break;
         case 'interruption':
@@ -106,7 +119,12 @@ export class Agent {
           logger.info(`Agent Response: ${event.agent_response_event.agent_response}`);
           break;
         case 'user_transcript':
+          if (this.turn) this.turn.transcriptAt = Date.now();
           logger.info(`User Transcript: "${event.user_transcription_event.user_transcript}"`);
+          break;
+        case 'ping':
+          this.send({ type: 'pong', event_id: event.ping_event.event_id });
+          this.pingMs = event.ping_event.ping_ms ?? this.pingMs;
           break;
         case 'client_tool_call':
           await this.handleClientToolCall(event.client_tool_call);
@@ -115,6 +133,19 @@ export class Agent {
     } catch (error) {
       logger.error(error, 'Error handling ElevenLabs Agent WebSocket message');
     }
+  }
+
+  private logResponseLatency(): void {
+    if (!this.turn) return;
+
+    const { speechEndedAt, transcriptAt } = this.turn;
+    this.turn = null;
+    const transcript = transcriptAt ? `${transcriptAt - speechEndedAt} ms` : 'not received';
+    const ping = this.pingMs === null ? 'unknown' : `${Math.round(this.pingMs)} ms`;
+    logger.info(
+      `Latency: agent audio ${Date.now() - speechEndedAt} ms after end of speech ` +
+        `(transcript: ${transcript}, network round trip: ${ping})`
+    );
   }
 
   /**
