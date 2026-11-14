@@ -10,11 +10,12 @@ const envPath = resolve(rootDir, '.env');
 const envExamplePath = resolve(rootDir, 'env.example');
 const agentConfigPath = resolve(rootDir, 'src', 'config', 'elevenlabs', 'discord-agent.json');
 const createAgentUrl = 'https://api.elevenlabs.io/v1/convai/agents/create';
-// Voice, plus what the message search tool needs.
+// Voice, plus what the message search and soundboard tools need.
 const invitePermissions =
   PermissionFlagsBits.Connect |
   PermissionFlagsBits.Speak |
   PermissionFlagsBits.UseVAD |
+  PermissionFlagsBits.UseSoundboard |
   PermissionFlagsBits.ViewChannel |
   PermissionFlagsBits.ReadMessageHistory;
 
