@@ -1,371 +1,210 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PassThrough } from 'node:stream';
-import { logger } from '../dist/config/logger.js';
+import { once } from 'node:events';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { AudioPlayerStatus, createAudioPlayer } from '@discordjs/voice';
+import { WebSocketServer } from 'ws';
+import { Agent } from '../dist/api/elevenlabs/agent.js';
 
-process.env.DISCORD_BOT_TOKEN ??= 'test-token';
-process.env.DISCORD_CLIENT_ID ??= 'test-client';
-process.env.AGENT_ID ??= 'test-agent';
+const AUDIO_EVENT = {
+  type: 'audio',
+  audio_event: { audio_base_64: Buffer.alloc(1920).toString('base64') },
+};
 
-const { Agent } = await import('../dist/api/elevenlabs/agent.js');
-const { createClientTools } = await import('../dist/tools/clientTools.js');
+/**
+ * Connects an Agent to a local WebSocket server standing in for ElevenLabs.
+ */
+async function startSession(t, tools = {}) {
+  const server = new WebSocketServer({ port: 0 });
+  await once(server, 'listening');
 
-function createAudioPlayer() {
-  return {
-    off() {},
-    on() {},
-    play() {},
-    stop() {},
+  const audioPlayer = createAudioPlayer();
+  const played = [];
+  const play = audioPlayer.play.bind(audioPlayer);
+  audioPlayer.play = resource => {
+    played.push(resource);
+    play(resource);
   };
-}
 
-function pcm16(...samples) {
-  const buffer = Buffer.alloc(samples.length * 2);
-  samples.forEach((sample, index) => {
-    buffer.writeInt16LE(sample, index * 2);
+  const agent = new Agent({
+    url: `ws://127.0.0.1:${server.address().port}`,
+    audioPlayer,
+    tools: { ...tools, sync: async () => 'synced' },
   });
-  return buffer;
-}
-
-test('Agent emits disconnect when the websocket closes remotely', () => {
-  const agent = new Agent(createAudioPlayer());
-
-  agent.socket = {
-    close() {},
-    off() {},
-    readyState: 1,
-  };
-  agent.pcmStream = new PassThrough();
-
-  let disconnects = 0;
-  agent.on('disconnect', () => {
-    disconnects += 1;
-  });
-
-  agent.handleSocketClose(1000, Buffer.from('normal closure'));
-
-  assert.equal(disconnects, 1);
-  assert.equal(agent.socket, null);
-  assert.equal(agent.pcmStream, null);
-});
-
-test('Agent logs raw conversation text', () => {
-  const agent = new Agent(createAudioPlayer());
-  const originalInfo = logger.info;
-  const messages = [];
-
-  logger.info = (...args) => {
-    const message = args.join(' ');
-    if (message.includes('Agent Response') || message.includes('User Transcript')) {
-      messages.push(message);
-    }
-  };
-
-  try {
-    agent.handleAgentResponse({
-      type: 'agent_response',
-      agent_response_event: { agent_response: 'top secret answer' },
-    });
-    agent.handleUserTranscript({
-      type: 'user_transcript',
-      user_transcription_event: { user_transcript: 'my private note' },
-    });
-  } finally {
-    logger.info = originalInfo;
-  }
-
-  assert.deepEqual(messages, [
-    'Agent Response: top secret answer',
-    'User Transcript: "my private note"',
+  let closes = 0;
+  const [[remote]] = await Promise.all([
+    once(server, 'connection'),
+    agent.connect(() => {
+      closes += 1;
+    }),
   ]);
-});
 
-test('Agent sends input audio chunks as base64 only when the websocket is open', () => {
-  const agent = new Agent(createAudioPlayer());
-  const sent = [];
+  t.after(() => {
+    agent.disconnect();
+    server.close();
+  });
 
-  agent.socket = {
-    readyState: 1,
-    send(message) {
-      sent.push(JSON.parse(message));
-    },
+  const sendEvent = event => remote.send(JSON.stringify(event));
+  const receiveEvent = async () => JSON.parse((await once(remote, 'message'))[0].toString());
+  const callTool = async (tool_name, parameters) => {
+    sendEvent({
+      type: 'client_tool_call',
+      client_tool_call: { tool_name, tool_call_id: 'call-1', parameters },
+    });
+    return receiveEvent();
   };
+
+  return {
+    agent,
+    audioPlayer,
+    played,
+    remote,
+    closes: () => closes,
+    sendEvent,
+    receiveEvent,
+    callTool,
+    // Events are handled in order, so a tool result means everything sent before it was handled.
+    flush: () => callTool('sync'),
+  };
+}
+
+async function waitFor(condition) {
+  for (let attempt = 0; attempt < 200 && !condition(); attempt++) {
+    await sleep(5);
+  }
+  assert.ok(condition(), 'Timed out waiting for condition');
+}
+
+test('Agent sends user audio as base64 chunks until it is disconnected', async t => {
+  const { agent, receiveEvent, flush, remote } = await startSession(t);
 
   agent.appendInputAudio(Buffer.from('hello'));
-  agent.appendInputAudio(Buffer.alloc(0));
+  assert.deepEqual(await receiveEvent(), { user_audio_chunk: 'aGVsbG8=' });
 
-  agent.socket.readyState = 3;
-  agent.appendInputAudio(Buffer.from('closed'));
+  await flush();
+  const received = [];
+  remote.on('message', data => received.push(data.toString()));
+  agent.disconnect();
+  agent.appendInputAudio(Buffer.from('ignored'));
+  await once(remote, 'close');
 
-  assert.deepEqual(sent, [{ user_audio_chunk: 'aGVsbG8=' }]);
+  assert.deepEqual(received, []);
 });
 
-test('Agent sends an error result for unsupported client tool calls', async () => {
-  const agent = new Agent(createAudioPlayer());
-  const sent = [];
+test('Agent rejects connect and reports the close when ElevenLabs is unreachable', async () => {
+  const server = new WebSocketServer({ port: 0 });
+  await once(server, 'listening');
+  const { port } = server.address();
+  server.close();
+  await once(server, 'close');
 
-  agent.socket = {
-    readyState: 1,
-    send(message) {
-      sent.push(JSON.parse(message));
-    },
-  };
+  const agent = new Agent({ url: `ws://127.0.0.1:${port}`, audioPlayer: createAudioPlayer() });
+  let closes = 0;
 
-  await agent.handleEvent(
-    Buffer.from(
-      JSON.stringify({
-        type: 'client_tool_call',
-        client_tool_call: {
-          tool_name: 'lookup',
-          tool_call_id: 'call-1',
-          parameters: { query: 'current time' },
-        },
-      })
-    )
+  await assert.rejects(
+    agent.connect(() => {
+      closes += 1;
+    })
   );
-
-  assert.deepEqual(sent, [
-    {
-      type: 'client_tool_result',
-      tool_call_id: 'call-1',
-      result: "Error: Unsupported tool 'lookup'.",
-      is_error: true,
-    },
-  ]);
+  await waitFor(() => closes === 1);
 });
 
-test('Agent executes client tool calls through the configured dispatcher', async () => {
-  const sent = [];
-  const toolCalls = [];
-  const agent = new Agent(createAudioPlayer(), {
-    clientTools: {
-      async execute(toolName, parameters) {
-        toolCalls.push({ toolName, parameters });
-        return { result: 'tool result', isError: false };
-      },
+test('Agent reports a remote close', async t => {
+  const { remote, closes } = await startSession(t);
+
+  remote.close();
+
+  await waitFor(() => closes() === 1);
+});
+
+test('Agent does not report its own disconnect', async t => {
+  const { agent, remote, closes } = await startSession(t);
+
+  agent.disconnect();
+  await once(remote, 'close');
+  await sleep(20);
+
+  assert.equal(closes(), 0);
+});
+
+test('Agent survives a WebSocket protocol error and reports the close', async t => {
+  const { remote, closes } = await startSession(t);
+
+  // RSV bits set without a negotiated extension is a protocol violation.
+  remote._socket.write(Buffer.from([0xff, 0xff, 0xff, 0xff]));
+
+  await waitFor(() => closes() === 1);
+});
+
+test('Agent runs client tools and sends back their result', async t => {
+  const calls = [];
+  const { callTool } = await startSession(t, {
+    lookup: async parameters => {
+      calls.push(parameters);
+      return 'tool result';
     },
   });
 
-  agent.socket = {
-    readyState: 1,
-    send(message) {
-      sent.push(JSON.parse(message));
-    },
-  };
+  const result = await callTool('lookup', { value: 'x' });
 
-  await agent.handleEvent(
-    Buffer.from(
-      JSON.stringify({
-        type: 'client_tool_call',
-        client_tool_call: {
-          tool_name: 'custom_tool',
-          tool_call_id: 'call-2',
-          parameters: { value: 'x' },
-        },
-      })
-    )
-  );
-
-  assert.deepEqual(toolCalls, [{ toolName: 'custom_tool', parameters: { value: 'x' } }]);
-  assert.deepEqual(sent, [
-    {
-      type: 'client_tool_result',
-      tool_call_id: 'call-2',
-      result: 'tool result',
-      is_error: false,
-    },
-  ]);
-});
-
-test('Discord message search client tool builds the Discord search request', async () => {
-  const sent = [];
-  const restCalls = [];
-  const agent = new Agent(createAudioPlayer(), {
-    clientTools: createClientTools({
-      discordMessageSearch: {
-        guildId: 'guild-1',
-        channelId: 'channel-1',
-        rest: {
-          async get(route, options) {
-            restCalls.push({ route, query: options.query });
-            return {
-              doing_deep_historical_index: false,
-              total_results: 1,
-              messages: [
-                [
-                  {
-                    id: 'message-1',
-                    channel_id: 'channel-1',
-                    author: {
-                      id: 'user-1',
-                      username: 'Marco',
-                      global_name: null,
-                    },
-                    timestamp: '2026-06-03T10:15:00.000Z',
-                    content: 'deploy went through',
-                  },
-                ],
-              ],
-            };
-          },
-        },
-      },
-    }),
+  assert.deepEqual(calls, [{ value: 'x' }]);
+  assert.deepEqual(result, {
+    type: 'client_tool_result',
+    tool_call_id: 'call-1',
+    result: 'tool result',
+    is_error: false,
   });
-
-  agent.socket = {
-    readyState: 1,
-    send(message) {
-      sent.push(JSON.parse(message));
-    },
-  };
-
-  await agent.handleEvent(
-    Buffer.from(
-      JSON.stringify({
-        type: 'client_tool_call',
-        client_tool_call: {
-          tool_name: 'search_discord_messages',
-          tool_call_id: 'call-3',
-          parameters: { query: 'deploy', limit: 2 },
-        },
-      })
-    )
-  );
-
-  assert.equal(restCalls.length, 1);
-  assert.equal(restCalls[0].route, '/guilds/guild-1/messages/search');
-  assert.equal(restCalls[0].query.get('content'), 'deploy');
-  assert.equal(restCalls[0].query.get('limit'), '2');
-  assert.equal(restCalls[0].query.get('channel_id'), 'channel-1');
-
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].type, 'client_tool_result');
-  assert.equal(sent[0].tool_call_id, 'call-3');
-  assert.equal(sent[0].is_error, false);
-
-  const result = JSON.parse(sent[0].result);
-  assert.equal(result.totalResults, 1);
-  assert.equal(result.returned, 1);
-  assert.equal(result.results[0].content, 'deploy went through');
-  assert.equal(result.results[0].url, 'https://discord.com/channels/guild-1/channel-1/message-1');
 });
 
-test('Discord message search supports channel names and first-message mode without a query', async () => {
-  const sent = [];
-  const restCalls = [];
-  const agent = new Agent(createAudioPlayer(), {
-    clientTools: createClientTools({
-      discordMessageSearch: {
-        guildId: 'guild-1',
-        channelId: 'current-channel',
-        resolveChannelId(channelName) {
-          return channelName.toLowerCase() === 'test' ? 'test-channel' : undefined;
-        },
-        rest: {
-          async get(route, options) {
-            restCalls.push({ route, query: options.query });
-            return {
-              doing_deep_historical_index: false,
-              total_results: 1,
-              messages: [
-                [
-                  {
-                    id: 'first-message',
-                    channel_id: 'test-channel',
-                    author: {
-                      id: 'user-1',
-                      username: 'Marco',
-                      global_name: null,
-                    },
-                    timestamp: '2026-06-03T09:00:00.000Z',
-                    content: 'Das ist ein test',
-                  },
-                ],
-              ],
-            };
-          },
-        },
-      },
-    }),
-  });
-
-  agent.socket = {
-    readyState: 1,
-    send(message) {
-      sent.push(JSON.parse(message));
-    },
-  };
-
-  await agent.handleEvent(
-    Buffer.from(
-      JSON.stringify({
-        type: 'client_tool_call',
-        client_tool_call: {
-          tool_name: 'search_discord_messages',
-          tool_call_id: 'call-4',
-          parameters: { channelName: 'Test', mode: 'first', limit: 1 },
-        },
-      })
-    )
-  );
-
-  assert.equal(restCalls.length, 1);
-  assert.equal(restCalls[0].route, '/guilds/guild-1/messages/search');
-  assert.equal(restCalls[0].query.has('content'), false);
-  assert.equal(restCalls[0].query.get('channel_id'), 'test-channel');
-  assert.equal(restCalls[0].query.get('sort_by'), 'timestamp');
-  assert.equal(restCalls[0].query.get('sort_order'), 'asc');
-  assert.equal(restCalls[0].query.get('limit'), '1');
-
-  const result = JSON.parse(sent[0].result);
-  assert.equal(sent[0].tool_call_id, 'call-4');
-  assert.equal(sent[0].is_error, false);
-  assert.equal(result.mode, 'first');
-  assert.equal(result.results[0].content, 'Das ist ein test');
-});
-
-test('Agent streams output audio as stereo PCM and reuses the active stream', () => {
-  const played = [];
-  const audioPlayer = {
-    off() {},
-    on() {},
-    play(resource) {
-      played.push(resource);
-    },
-    stop() {},
-  };
-  const agent = new Agent(audioPlayer);
-
-  agent.handleAudio({
-    type: 'audio',
-    audio_event: {
-      event_id: 1,
-      audio_base_64: pcm16(258, -258).toString('base64'),
+test('Agent sends an error result when a client tool is unknown or fails', async t => {
+  const { callTool } = await startSession(t, {
+    broken: async () => {
+      throw new Error('boom');
     },
   });
 
-  const firstStream = agent.pcmStream;
-  assert.ok(firstStream);
+  assert.deepEqual(await callTool('missing', {}), {
+    type: 'client_tool_result',
+    tool_call_id: 'call-1',
+    result: "Error: Unsupported tool 'missing'.",
+    is_error: true,
+  });
+  assert.deepEqual(await callTool('broken', {}), {
+    type: 'client_tool_result',
+    tool_call_id: 'call-1',
+    result: 'Error: boom',
+    is_error: true,
+  });
+});
+
+test('Agent keeps one playback per response and starts a new one after an interruption', async t => {
+  const { played, sendEvent, flush } = await startSession(t);
+
+  sendEvent(AUDIO_EVENT);
+  sendEvent(AUDIO_EVENT);
+  await flush();
   assert.equal(played.length, 1);
-  assert.deepEqual(firstStream.read(), pcm16(258, 258, -258, -258));
 
-  const writes = [];
-  const originalWrite = firstStream.write.bind(firstStream);
-  firstStream.write = (chunk, ...args) => {
-    writes.push(Buffer.from(chunk));
-    return originalWrite(chunk, ...args);
-  };
+  sendEvent({ type: 'interruption' });
+  sendEvent(AUDIO_EVENT);
+  sendEvent(AUDIO_EVENT);
+  await flush();
+  assert.equal(played.length, 2);
+  assert.notEqual(played[1], played[0]);
+});
 
-  agent.handleAudio({
-    type: 'audio',
-    audio_event: {
-      event_id: 2,
-      audio_base_64: pcm16(1024).toString('base64'),
-    },
-  });
+test('Agent stops playback when it is disconnected', async t => {
+  const { agent, audioPlayer, sendEvent, flush } = await startSession(t);
+  const errors = [];
+  audioPlayer.on('error', error => errors.push(error));
 
-  assert.equal(agent.pcmStream, firstStream);
-  assert.equal(played.length, 1);
-  assert.deepEqual(writes, [pcm16(1024, 1024)]);
+  sendEvent(AUDIO_EVENT);
+  await flush();
+  assert.notEqual(audioPlayer.state.status, AudioPlayerStatus.Idle);
+
+  agent.disconnect();
+  await sleep(20);
+
+  assert.equal(audioPlayer.state.status, AudioPlayerStatus.Idle);
+  assert.deepEqual(errors, []);
 });

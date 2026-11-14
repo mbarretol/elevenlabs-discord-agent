@@ -8,6 +8,7 @@
 - Lint: `npm run lint`
 - Format check: `npm run format`
 - Format fix: `npm run format:fix`
+- Deploy slash commands: `npm run deploy`
 - Start bot: `npm start`
 
 ## Project Layout
@@ -15,10 +16,12 @@
 - Discord client entrypoint: `src/api/discord/client.ts`
 - Discord voice/speech handling: `src/api/discord/speech.ts`
 - ElevenLabs WebSocket agent: `src/api/elevenlabs/agent.ts`
-- Slash commands: `src/commands`
+- Slash commands and their dispatcher: `src/commands`
+- Slash command deploy script: `src/deployCommands.ts`
+- Client tools the agent can call: `src/tools`
 - Config and logging: `src/config`
 - Shared helpers: `src/utils`
-- Tests: `test`
+- Tests: `test` (plain JS, run against the built `dist`)
 
 ## Conventions
 

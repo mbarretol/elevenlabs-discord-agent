@@ -8,4 +8,12 @@ export default [
   { languageOptions: { globals: globals.node } },
   pluginJs.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ['src/**/*.ts'],
+    languageOptions: { parserOptions: { projectService: true } },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+    },
+  },
 ];

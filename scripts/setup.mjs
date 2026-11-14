@@ -1,87 +1,50 @@
 import { existsSync } from 'node:fs';
 import { copyFile, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import readline from 'node:readline/promises';
+import { PermissionFlagsBits } from 'discord.js';
+import { parse } from 'dotenv';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = resolve(__dirname, '..');
+const rootDir = resolve(import.meta.dirname, '..');
 const envPath = resolve(rootDir, '.env');
 const envExamplePath = resolve(rootDir, 'env.example');
 const agentConfigPath = resolve(rootDir, 'src', 'config', 'elevenlabs', 'discord-agent.json');
 const createAgentUrl = 'https://api.elevenlabs.io/v1/convai/agents/create';
-const discordVoicePermissions = 36_700_160;
-
-function printHelp() {
-  console.log(`Usage: npm run setup
-
-Creates or updates .env, creates an ElevenLabs agent from the bundled config,
-and prints a Discord invite URL.`);
-}
-
-function parseEnv(contents) {
-  const values = {};
-
-  for (const line of contents.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const separatorIndex = trimmed.indexOf('=');
-    if (separatorIndex === -1) continue;
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const value = trimmed.slice(separatorIndex + 1).trim();
-    values[key] = value;
-  }
-
-  return values;
-}
+// Voice, plus what the message search tool needs.
+const invitePermissions =
+  PermissionFlagsBits.Connect |
+  PermissionFlagsBits.Speak |
+  PermissionFlagsBits.UseVAD |
+  PermissionFlagsBits.ViewChannel |
+  PermissionFlagsBits.ReadMessageHistory;
 
 function upsertEnv(contents, updates) {
-  const seen = new Set();
-  const lines = contents.split(/\r?\n/).map(line => {
-    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=/);
-    if (!match) return line;
+  const remaining = { ...updates };
+  const lines = contents
+    .trimEnd()
+    .split(/\r?\n/)
+    .map(line => {
+      const key = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=/)?.[1];
+      if (!key || !(key in remaining)) return line;
 
-    const key = match[1];
-    if (!(key in updates)) return line;
+      const value = remaining[key];
+      delete remaining[key];
+      return `${key}=${value}`;
+    });
 
-    seen.add(key);
-    return `${key}=${updates[key]}`;
-  });
-
-  for (const [key, value] of Object.entries(updates)) {
-    if (!seen.has(key)) {
-      lines.push(`${key}=${value}`);
-    }
+  for (const [key, value] of Object.entries(remaining)) {
+    lines.push(`${key}=${value}`);
   }
 
-  return `${lines.filter((line, index, all) => line || index < all.length - 1).join('\n')}\n`;
+  return `${lines.join('\n')}\n`;
 }
 
-function formatErrorDetail(detail) {
-  return typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2);
-}
-
-async function ensureEnvFile() {
-  if (existsSync(envPath)) return;
-
-  if (existsSync(envExamplePath)) {
-    await copyFile(envExamplePath, envPath);
-    console.log('Created .env from env.example.');
-    return;
-  }
-
-  await writeFile(envPath, '', 'utf8');
-  console.log('Created .env.');
-}
-
-async function promptFor(rl, label, existingValue, { required = true, sensitive = false } = {}) {
+async function promptFor(rl, label, existingValue, { sensitive = false } = {}) {
   const suffix = existingValue ? ` [current: ${sensitive ? 'set' : existingValue}]` : '';
   const answer = await rl.question(`${label}${suffix}: `);
   const value = answer.trim() || existingValue;
 
-  if (required && !value) {
+  if (!value) {
     throw new Error(`${label} is required.`);
   }
 
@@ -89,8 +52,6 @@ async function promptFor(rl, label, existingValue, { required = true, sensitive 
 }
 
 async function createAgent(apiKey) {
-  const agentConfig = JSON.parse(await readFile(agentConfigPath, 'utf8'));
-
   console.log('Creating ElevenLabs agent...');
   const response = await fetch(createAgentUrl, {
     method: 'POST',
@@ -98,36 +59,27 @@ async function createAgent(apiKey) {
       'xi-api-key': apiKey,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(agentConfig),
+    body: await readFile(agentConfigPath, 'utf8'),
   });
 
-  const responseText = await response.text();
-  let responseBody;
-  try {
-    responseBody = responseText ? JSON.parse(responseText) : {};
-  } catch {
-    responseBody = { detail: responseText };
-  }
-
+  const body = await response.text();
   if (!response.ok) {
-    const detail = responseBody.detail ?? responseBody.message ?? responseText;
-    throw new Error(
-      `ElevenLabs agent creation failed (${response.status}): ${formatErrorDetail(detail)}`
-    );
+    throw new Error(`ElevenLabs agent creation failed (${response.status}): ${body}`);
   }
 
-  if (!responseBody.agent_id) {
+  const { agent_id: agentId } = JSON.parse(body);
+  if (!agentId) {
     throw new Error('ElevenLabs did not return an agent_id.');
   }
 
-  console.log(`Created ElevenLabs agent: ${responseBody.agent_id}`);
-  return responseBody.agent_id;
+  console.log(`Created ElevenLabs agent: ${agentId}`);
+  return agentId;
 }
 
 function createInviteUrl(clientId) {
   const params = new URLSearchParams({
     client_id: clientId,
-    permissions: String(discordVoicePermissions),
+    permissions: String(invitePermissions),
     scope: 'bot applications.commands',
   });
 
@@ -135,46 +87,44 @@ function createInviteUrl(clientId) {
 }
 
 async function main() {
-  if (process.argv.includes('--help')) {
-    printHelp();
-    return;
+  if (!existsSync(envPath)) {
+    await copyFile(envExamplePath, envPath);
+    console.log('Created .env from env.example.');
   }
 
-  await ensureEnvFile();
-
   const envContents = await readFile(envPath, 'utf8');
-  const env = parseEnv(envContents);
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  const env = parse(envContents);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   try {
-    const discordToken = await promptFor(rl, 'Discord bot token', env.DISCORD_BOT_TOKEN, {
-      sensitive: true,
-    });
-    const discordClientId = await promptFor(rl, 'Discord client ID', env.DISCORD_CLIENT_ID);
-    const elevenLabsApiKey = await promptFor(rl, 'ElevenLabs API key', env.ELEVENLABS_API_KEY, {
-      sensitive: true,
-    });
-    const agentId = await createAgent(elevenLabsApiKey);
-
     const updates = {
-      DISCORD_BOT_TOKEN: discordToken,
-      DISCORD_CLIENT_ID: discordClientId,
-      AGENT_ID: agentId,
+      DISCORD_BOT_TOKEN: await promptFor(rl, 'Discord bot token', env.DISCORD_BOT_TOKEN, {
+        sensitive: true,
+      }),
+      DISCORD_CLIENT_ID: await promptFor(rl, 'Discord client ID', env.DISCORD_CLIENT_ID),
     };
 
-    if (elevenLabsApiKey) {
-      updates.ELEVENLABS_API_KEY = elevenLabsApiKey;
+    if (env.AGENT_ID) {
+      console.log(
+        `Keeping ElevenLabs agent ${env.AGENT_ID}. Remove AGENT_ID from .env to create a new one.`
+      );
+    } else {
+      updates.ELEVENLABS_API_KEY = await promptFor(
+        rl,
+        'ElevenLabs API key',
+        env.ELEVENLABS_API_KEY,
+        {
+          sensitive: true,
+        }
+      );
+      updates.AGENT_ID = await createAgent(updates.ELEVENLABS_API_KEY);
     }
 
     await writeFile(envPath, upsertEnv(envContents, updates), 'utf8');
 
     console.log('\nSetup complete.');
-    console.log(`Invite URL: ${createInviteUrl(discordClientId)}`);
-    console.log('\nNext step: npm start');
+    console.log(`Invite URL: ${createInviteUrl(updates.DISCORD_CLIENT_ID)}`);
+    console.log('\nNext steps: npm run deploy, then npm start');
   } finally {
     rl.close();
   }
