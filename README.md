@@ -69,6 +69,25 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 
     **Note:** You must be in a voice channel for the bot to join.
 
+## Latency
+
+Each answer is logged with its latency:
+
+```
+Latency: agent audio 850 ms after end of speech (transcript: 310 ms, network round trip: 25 ms)
+```
+
+- **agent audio**: from the user's last voice packet to the first audio of the answer.
+- **transcript**: when the final transcript of the user's turn arrived.
+- **network round trip**: between the bot and ElevenLabs.
+
+To keep it low:
+
+- The bundled agent runs on [Eleven Realtime v1 Mini](https://elevenlabs.io/docs/eleven-agents/customization/realtime-models) (`realtime_model` in the agent config), ElevenLabs' lowest-latency model for voice conversation. Realtime models are rolling out gradually; workspaces without access get the configured LLM and text-to-speech models instead.
+- Host the bot close to ElevenLabs. Its servers are in the USA, the Netherlands and Singapore.
+- Set the voice channel's region override to the region nearest the bot, e.g. Rotterdam for a bot hosted in the Netherlands (voice channel settings, Region Override).
+- `src/config/elevenlabs/discord-agent.json` only applies when `npm run setup` creates the agent. To apply changes to an existing agent, edit it in the ElevenLabs dashboard, or remove `AGENT_ID` from `.env` and run setup again.
+
 ## License
 
 This project is licensed under the terms of the [MIT license](LICENSE).

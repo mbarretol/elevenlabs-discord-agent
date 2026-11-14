@@ -9,6 +9,9 @@ import { SpeechHandler } from '../dist/api/discord/speech.js';
 // 20 ms of 16 kHz mono audio, as an Opus packet and as the PCM it decodes to.
 const PCM_FRAME_BYTES = 640;
 const OPUS_PACKET = new opus.OpusEncoder(16_000, 1).encode(Buffer.alloc(PCM_FRAME_BYTES));
+// The frame Discord clients send at the end of each transmission.
+const OPUS_SILENCE_FRAME = Buffer.from([0xf8, 0xff, 0xfe]);
+const HEAD_START_BYTES = 9_600;
 
 class FakeConnection extends EventEmitter {
   state = { status: VoiceConnectionStatus.Ready };
@@ -41,6 +44,7 @@ class FakeConnection extends EventEmitter {
 function createAgent() {
   return {
     audio: [],
+    speechEnds: [],
     disconnects: 0,
     async connect(onClose) {
       this.onClose = onClose;
@@ -50,6 +54,9 @@ function createAgent() {
     },
     appendInputAudio(buffer) {
       this.audio.push(buffer);
+    },
+    markUserSpeechEnd(time) {
+      this.speechEnds.push(time);
     },
   };
 }
@@ -80,15 +87,8 @@ test('SpeechHandler streams one speaker at a time to the agent', async () => {
 
   // A second speaker is ignored while the first is being streamed.
   speaking.emit('start', 'user-2');
-  speaking.emit('end', 'user-2');
   assert.equal(connection.subscriptions.length, 1);
   assert.equal(agent.audio.length, 1);
-
-  // The active speaker going quiet is marked with 300 ms of silence.
-  speaking.emit('end', 'user-1');
-  assert.equal(agent.audio.length, 2);
-  assert.equal(agent.audio[1].byteLength, 9_600);
-  assert.ok(agent.audio[1].every(byte => byte === 0));
 
   // Once the stream has ended, the next speaker is picked up.
   first.stream.end();
@@ -96,6 +96,57 @@ test('SpeechHandler streams one speaker at a time to the agent', async () => {
   speaking.emit('start', 'user-2');
   assert.equal(connection.subscriptions.length, 2);
   assert.equal(connection.subscriptions[1].userId, 'user-2');
+});
+
+test('SpeechHandler streams silence in real time while no one speaks', async t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 1_000 });
+  const { agent, connection, speaking } = await createSession();
+
+  t.mock.timers.tick(60);
+  assert.equal(agent.audio.length, 3);
+  assert.ok(agent.audio.every(chunk => chunk.byteLength === PCM_FRAME_BYTES));
+  assert.ok(agent.audio.every(chunk => chunk.every(byte => byte === 0)));
+
+  // No silence is mixed into the user's voice.
+  agent.audio.length = 0;
+  speaking.emit('start', 'user-1');
+  const [{ stream }] = connection.subscriptions;
+  for (let i = 0; i < 3; i++) {
+    stream.write(OPUS_PACKET);
+    await nextTick();
+    t.mock.timers.tick(20);
+  }
+  assert.equal(agent.audio.length, 3);
+  assert.deepEqual(agent.speechEnds, []);
+
+  // Discord's end-of-transmission frames are dropped.
+  stream.write(OPUS_SILENCE_FRAME);
+  await nextTick();
+  assert.equal(agent.audio.length, 3);
+
+  // 60 ms after the last voice packet, the end of speech is marked with a head start of silence.
+  t.mock.timers.tick(20);
+  assert.deepEqual(agent.speechEnds, []);
+  t.mock.timers.tick(20);
+  assert.deepEqual(agent.speechEnds, [1_100]);
+  assert.equal(agent.audio.length, 4);
+  assert.equal(agent.audio[3].byteLength, HEAD_START_BYTES);
+
+  // Then real-time silence resumes.
+  t.mock.timers.tick(40);
+  assert.equal(agent.audio.length, 6);
+  assert.equal(agent.audio[5].byteLength, PCM_FRAME_BYTES);
+  assert.equal(agent.speechEnds.length, 1);
+});
+
+test('SpeechHandler stops streaming silence when the voice connection is destroyed', async t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] });
+  const { agent, connection } = await createSession();
+
+  connection.destroy();
+  t.mock.timers.tick(100);
+
+  assert.deepEqual(agent.audio, []);
 });
 
 test('SpeechHandler skips packets that cannot be decoded', async () => {

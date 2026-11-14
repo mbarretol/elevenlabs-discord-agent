@@ -5,6 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { AudioPlayerStatus, createAudioPlayer } from '@discordjs/voice';
 import { WebSocketServer } from 'ws';
 import { Agent } from '../dist/api/elevenlabs/agent.js';
+import { logger } from '../dist/config/logger.js';
 
 const AUDIO_EVENT = {
   type: 'audio',
@@ -207,4 +208,34 @@ test('Agent stops playback when it is disconnected', async t => {
 
   assert.equal(audioPlayer.state.status, AudioPlayerStatus.Idle);
   assert.deepEqual(errors, []);
+});
+
+test('Agent answers pings', async t => {
+  const { sendEvent, receiveEvent } = await startSession(t);
+
+  sendEvent({ type: 'ping', ping_event: { event_id: 7, ping_ms: 42 } });
+
+  assert.deepEqual(await receiveEvent(), { type: 'pong', event_id: 7 });
+});
+
+test('Agent logs the response latency once per user turn', async t => {
+  const { agent, sendEvent, flush } = await startSession(t);
+  const logs = [];
+  t.mock.method(logger, 'info', message => logs.push(message));
+  const latencyLogs = () => logs.filter(message => message.startsWith('Latency:'));
+
+  sendEvent({ type: 'ping', ping_event: { event_id: 1, ping_ms: 42 } });
+  agent.markUserSpeechEnd(Date.now() - 500);
+  sendEvent({ type: 'user_transcript', user_transcription_event: { user_transcript: 'hi' } });
+  sendEvent(AUDIO_EVENT);
+  sendEvent(AUDIO_EVENT);
+  await flush();
+
+  assert.equal(latencyLogs().length, 1);
+  assert.match(
+    latencyLogs()[0],
+    /^Latency: agent audio \d+ ms after end of speech \(transcript: \d+ ms, network round trip: 42 ms\)$/
+  );
+  const [, total] = latencyLogs()[0].match(/agent audio (\d+) ms/);
+  assert.ok(Number(total) >= 500);
 });
