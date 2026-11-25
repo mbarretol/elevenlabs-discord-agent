@@ -62,7 +62,20 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         ...createSoundboardTools(interaction.member, voiceChannel),
       },
     });
-    await new SpeechHandler(agent, connection).initialize();
+    const { guild } = voiceChannel;
+    await new SpeechHandler(
+      agent,
+      connection,
+      async userId => (await guild.members.fetch(userId)).displayName
+    ).initialize();
+
+    const people = voiceChannel.members
+      .filter(member => member.id !== interaction.client.user.id)
+      .map(member => member.displayName);
+    agent.sendContextualUpdate(
+      `You are in the Discord voice channel "${voiceChannel.name}" on the server "${guild.name}". ` +
+        `In the call: ${people.join(', ')}.`
+    );
 
     await interaction.editReply({
       embeds: [Embeds.success('Connected', "Let's chat!")],

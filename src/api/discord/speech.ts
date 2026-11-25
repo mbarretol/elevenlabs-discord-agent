@@ -31,30 +31,35 @@ const HEAD_START_SILENCE = silence(300);
 // dropped so the end of speech is detected at the last voice packet.
 const OPUS_SILENCE_FRAME = Buffer.from([0xf8, 0xff, 0xfe]);
 
+/** Returns the name the agent should know a Discord user by. */
+export type SpeakerNameResolver = (userId: string) => Promise<string>;
+
 /**
- * Streams one Discord speaker at a time to the ElevenLabs agent and ties the
- * lifetime of the agent session to the voice connection.
+ * Streams one Discord speaker at a time to the ElevenLabs agent, tells it who
+ * is speaking, and ties the lifetime of the agent session to the voice connection.
  */
 export class SpeechHandler {
   private readonly agent: Agent;
   private readonly connection: VoiceConnection;
+  private readonly getSpeakerName: SpeakerNameResolver;
   private readonly decoder = new opus.OpusEncoder(SAMPLE_RATE, 1);
   private speaker: { userId: string; stream: AudioReceiveStream } | null = null;
+  private lastSpeakerId: string | null = null;
   private silenceTimer: NodeJS.Timeout | undefined;
   private lastVoiceAt = 0;
   private userSilent = true;
 
-  constructor(agent: Agent, connection: VoiceConnection) {
+  constructor(agent: Agent, connection: VoiceConnection, getSpeakerName: SpeakerNameResolver) {
     this.agent = agent;
     this.connection = connection;
+    this.getSpeakerName = getSpeakerName;
   }
 
   /**
-   * Starts listening to the voice connection, then connects to ElevenLabs and
-   * starts streaming audio.
+   * Connects to ElevenLabs, then starts listening to the voice connection and
+   * streaming audio. Speech before that would be lost anyway.
    */
   async initialize(): Promise<void> {
-    this.connection.receiver.speaking.on('start', userId => this.handleSpeakingStart(userId));
     this.connection.on(VoiceConnectionStatus.Disconnected, () => void this.handleDisconnect());
     this.connection.once(VoiceConnectionStatus.Destroyed, () => this.handleDestroy());
 
@@ -62,15 +67,22 @@ export class SpeechHandler {
       logger.warn('ElevenLabs agent disconnected. Destroying voice connection.');
       this.connection.destroy();
     });
+    this.connection.receiver.speaking.on('start', userId => this.handleSpeakingStart(userId));
     this.silenceTimer = setInterval(() => this.sendSilence(), FRAME_MS);
   }
 
   /**
-   * Subscribes to the user's audio unless someone is already being streamed.
+   * Subscribes to the user's audio unless someone is already being streamed,
+   * and names them to the agent when they take over from someone else.
    * The stream ends itself after a short period without voice packets.
    */
   private handleSpeakingStart(userId: string): void {
     if (this.speaker) return;
+
+    if (userId !== this.lastSpeakerId) {
+      this.lastSpeakerId = userId;
+      void this.announceSpeaker(userId);
+    }
 
     const stream = this.connection.receiver.subscribe(userId, {
       end: { behavior: EndBehaviorType.AfterInactivity, duration: STREAM_INACTIVITY_MS },
@@ -82,6 +94,14 @@ export class SpeechHandler {
     stream.once('close', () => {
       this.speaker = null;
     });
+  }
+
+  private async announceSpeaker(userId: string): Promise<void> {
+    try {
+      this.agent.sendContextualUpdate(`${await this.getSpeakerName(userId)} is now speaking.`);
+    } catch (error) {
+      logger.warn(error, `Could not name speaker ${userId} to the agent`);
+    }
   }
 
   private forwardAudio(packet: Buffer): void {

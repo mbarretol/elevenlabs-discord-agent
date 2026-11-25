@@ -66,4 +66,14 @@ export interface PongEvent {
   event_id: number;
 }
 
-export type ClientEvent = UserAudioChunkEvent | ClientToolResultEvent | PongEvent;
+/** Context for the agent that it does not answer directly. */
+export interface ContextualUpdateEvent {
+  type: 'contextual_update';
+  text: string;
+}
+
+export type ClientEvent =
+  | UserAudioChunkEvent
+  | ClientToolResultEvent
+  | PongEvent
+  | ContextualUpdateEvent;

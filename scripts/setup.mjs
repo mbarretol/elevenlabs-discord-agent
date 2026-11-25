@@ -4,12 +4,11 @@ import { resolve } from 'node:path';
 import readline from 'node:readline/promises';
 import { PermissionFlagsBits } from 'discord.js';
 import { parse } from 'dotenv';
+import { readAgentConfig, sendAgentConfig } from './agentApi.mjs';
 
 const rootDir = resolve(import.meta.dirname, '..');
 const envPath = resolve(rootDir, '.env');
 const envExamplePath = resolve(rootDir, 'env.example');
-const agentConfigPath = resolve(rootDir, 'src', 'config', 'elevenlabs', 'discord-agent.json');
-const createAgentUrl = 'https://api.elevenlabs.io/v1/convai/agents/create';
 // Voice, plus what the message search and soundboard tools need.
 const invitePermissions =
   PermissionFlagsBits.Connect |
@@ -52,39 +51,9 @@ async function promptFor(rl, label, existingValue, { sensitive = false } = {}) {
   return value;
 }
 
-function postAgent(apiKey, config) {
-  return fetch(createAgentUrl, {
-    method: 'POST',
-    headers: {
-      'xi-api-key': apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(config),
-  });
-}
-
-async function createAgent(apiKey) {
+async function createAgent(apiKey, language) {
   console.log('Creating ElevenLabs agent...');
-  const config = JSON.parse(await readFile(agentConfigPath, 'utf8'));
-  let response = await postAgent(apiKey, config);
-  let body = await response.text();
-
-  // Realtime models are rolling out gradually. Without access, the agent runs
-  // its configured speech-to-text, LLM and text-to-speech models instead.
-  if (!response.ok && body.includes('Realtime models are not available')) {
-    console.log(
-      'Realtime models are not available for this workspace yet. Using the standard models.'
-    );
-    config.conversation_config.realtime_model = null;
-    response = await postAgent(apiKey, config);
-    body = await response.text();
-  }
-
-  if (!response.ok) {
-    throw new Error(`ElevenLabs agent creation failed (${response.status}): ${body}`);
-  }
-
-  const { agent_id: agentId } = JSON.parse(body);
+  const { agent_id: agentId } = await sendAgentConfig(apiKey, await readAgentConfig(language));
   if (!agentId) {
     throw new Error('ElevenLabs did not return an agent_id.');
   }
@@ -123,7 +92,8 @@ async function main() {
 
     if (env.AGENT_ID) {
       console.log(
-        `Keeping ElevenLabs agent ${env.AGENT_ID}. Remove AGENT_ID from .env to create a new one.`
+        `Keeping ElevenLabs agent ${env.AGENT_ID}. Run npm run update-agent to apply ` +
+          'src/config/elevenlabs/discord-agent.json to it, or remove AGENT_ID from .env to create a new one.'
       );
     } else {
       updates.ELEVENLABS_API_KEY = await promptFor(
@@ -134,7 +104,7 @@ async function main() {
           sensitive: true,
         }
       );
-      updates.AGENT_ID = await createAgent(updates.ELEVENLABS_API_KEY);
+      updates.AGENT_ID = await createAgent(updates.ELEVENLABS_API_KEY, env.AGENT_LANGUAGE?.trim());
     }
 
     await writeFile(envPath, upsertEnv(envContents, updates), 'utf8');

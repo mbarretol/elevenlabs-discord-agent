@@ -92,6 +92,17 @@ test('Agent sends user audio as base64 chunks until it is disconnected', async t
   assert.deepEqual(received, []);
 });
 
+test('Agent sends contextual updates', async t => {
+  const { agent, receiveEvent } = await startSession(t);
+
+  agent.sendContextualUpdate('Marco is now speaking.');
+
+  assert.deepEqual(await receiveEvent(), {
+    type: 'contextual_update',
+    text: 'Marco is now speaking.',
+  });
+});
+
 test('Agent rejects connect and reports the close when ElevenLabs is unreachable', async () => {
   const server = new WebSocketServer({ port: 0 });
   await once(server, 'listening');

@@ -88,6 +88,14 @@ export class Agent {
   }
 
   /**
+   * Tells the agent something about the conversation, such as who is speaking,
+   * without prompting an answer.
+   */
+  public sendContextualUpdate(text: string): void {
+    this.send({ type: 'contextual_update', text });
+  }
+
+  /**
    * Marks the end of the user's speech. The time until the agent's first audio
    * is logged as the response latency.
    * @param time - When the last voice packet arrived, from `Date.now()`.

@@ -12,6 +12,7 @@
     "build": "npm run clean && tsc --project tsconfig.json",
     "deploy": "npm run build && node dist/deployCommands.js",
     "setup": "node scripts/setup.mjs",
+    "update-agent": "node scripts/update-agent.mjs",
     "start": "npm run build && node dist/api/discord/client.js",
     "test": "npm run build && node --test --test-force-exit",
     "format": "prettier --check .",

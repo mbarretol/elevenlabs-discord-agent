@@ -45,6 +45,7 @@ function createAgent() {
   return {
     audio: [],
     speechEnds: [],
+    updates: [],
     disconnects: 0,
     async connect(onClose) {
       this.onClose = onClose;
@@ -58,13 +59,16 @@ function createAgent() {
     markUserSpeechEnd(time) {
       this.speechEnds.push(time);
     },
+    sendContextualUpdate(text) {
+      this.updates.push(text);
+    },
   };
 }
 
-async function createSession() {
+async function createSession(getSpeakerName = async userId => `Name of ${userId}`) {
   const agent = createAgent();
   const connection = new FakeConnection();
-  await new SpeechHandler(agent, connection).initialize();
+  await new SpeechHandler(agent, connection, getSpeakerName).initialize();
   return { agent, connection, speaking: connection.receiver.speaking };
 }
 
@@ -96,6 +100,49 @@ test('SpeechHandler streams one speaker at a time to the agent', async () => {
   speaking.emit('start', 'user-2');
   assert.equal(connection.subscriptions.length, 2);
   assert.equal(connection.subscriptions[1].userId, 'user-2');
+});
+
+async function endStream(connection) {
+  const { stream } = connection.subscriptions.at(-1);
+  stream.end();
+  await once(stream, 'close');
+}
+
+test('SpeechHandler names the speaker to the agent when the speaker changes', async () => {
+  const { agent, connection, speaking } = await createSession();
+
+  speaking.emit('start', 'user-1');
+  await nextTick();
+  assert.deepEqual(agent.updates, ['Name of user-1 is now speaking.']);
+
+  // Someone talking over the current speaker is not streamed, so not named either.
+  speaking.emit('start', 'user-2');
+  await nextTick();
+  assert.equal(agent.updates.length, 1);
+
+  // The same speaker starting again is not named twice.
+  await endStream(connection);
+  speaking.emit('start', 'user-1');
+  await nextTick();
+  assert.equal(agent.updates.length, 1);
+
+  await endStream(connection);
+  speaking.emit('start', 'user-2');
+  await nextTick();
+  assert.deepEqual(agent.updates.slice(1), ['Name of user-2 is now speaking.']);
+});
+
+test('SpeechHandler still streams a speaker whose name cannot be found', async () => {
+  const { agent, connection, speaking } = await createSession(async () => {
+    throw new Error('Unknown Member');
+  });
+
+  speaking.emit('start', 'user-1');
+  connection.subscriptions[0].stream.write(OPUS_PACKET);
+  await nextTick();
+
+  assert.deepEqual(agent.updates, []);
+  assert.equal(agent.audio.length, 1);
 });
 
 test('SpeechHandler streams silence in real time while no one speaks', async t => {

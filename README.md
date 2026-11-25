@@ -7,6 +7,8 @@ A Discord bot that enables natural, real-time voice interactions in your server 
 - **Slash Command Support**: `/talk` starts a voice session and `/leave` disconnects the bot.
 - **Real-time Conversations**: WebSocket input and output streaming for low latency voice conversations.
 - **Interruption Handling**: The bot is able to handle interruptions gracefully.
+- **Speaker Awareness**: The agent knows the server, the channel, who is in the call, and who is speaking, so it can address people by name in group conversations.
+- **Group Etiquette**: The agent stays silent when people in the call talk to each other, leaves when asked to, and hangs up after 5 minutes without anyone speaking. Short reactions like "yeah", "genau" or "lol" do not interrupt it.
 - **Discord Message Search Tool**: The bundled ElevenLabs agent can search previous Discord messages by text, channel, or first/latest message. Searches are limited to channels that the member who ran `/talk` can read.
 - **Soundboard Tools**: The agent can list and play the server's soundboard sounds, or Discord's default ones, in the voice channel. Playing needs the member who ran `/talk` to have the Use Soundboard permission, and does not work in stage channels.
 
@@ -51,6 +53,10 @@ A Discord bot that enables natural, real-time voice interactions in your server 
    The setup script creates `.env`, creates a Discord-ready ElevenLabs agent from `src/config/elevenlabs/discord-agent.json`, saves the returned `AGENT_ID`, and prints a Discord invite URL. The bundled agent config includes the required audio settings and client tool schemas for Discord message search and the soundboard.
 
    Running it again keeps the existing agent. Remove `AGENT_ID` from `.env` first to create a new one.
+
+   The agent speaks English by default and switches to German when someone speaks it. To make another main language the default, set `AGENT_LANGUAGE` in `.env` (for example `de`) before running setup or `npm run update-agent`.
+
+   To apply later changes to `discord-agent.json` to the existing agent, run `npm run update-agent`. It updates the prompt, settings and system tools; client tool definitions are left as they are.
 
 8. Open the generated invite URL in your browser and invite the bot to your server.
 
